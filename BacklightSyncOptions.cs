@@ -46,6 +46,13 @@ public sealed class BacklightSyncOptions
     public bool IgnoreAdaptiveChanges { get; set; } = false;
 
     /// <summary>
+    /// How often (seconds) the self-healing check runs: verifies the screen brightness still
+    /// matches the stored plan values and re-syncs if they drifted (e.g. brightness changed
+    /// during sleep/wake without an event). 0 disables the check.
+    /// </summary>
+    public int PeriodicResyncSeconds { get; set; } = 60;
+
+    /// <summary>
     /// Ignore brightness events arriving shortly after we applied a sync.
     /// Loop protection: re-applying the active scheme can itself emit a brightness event.
     /// </summary>

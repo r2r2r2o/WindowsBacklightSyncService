@@ -37,6 +37,12 @@ public sealed class BrightnessWatcher : IDisposable
     /// <summary>Raised when the backlight level changes. Arguments: (brightnessPercent 0-100, isAdaptiveChange).</summary>
     public event Action<int, bool>? BrightnessChanged;
 
+    /// <summary>
+    /// False once the WMI event subscription has stopped or failed to start. The worker
+    /// checks this regularly and restarts the watcher when needed (e.g. after sleep/wake).
+    /// </summary>
+    public bool WmiWatcherAlive { get; private set; }
+
     /// <summary>Registry sub-path (relative to the hive) of the display brightness values.</summary>
     internal const string BrightnessRegistryKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Brightness";
 
@@ -46,10 +52,9 @@ public sealed class BrightnessWatcher : IDisposable
     }
 
     /// <summary>
-    /// Checks whether a WMI class exists in the root\wmi namespace by enumerating the
-    /// schema (Meta_Class) and matching the name exactly. A direct "SELECT ... FROM &lt;class&gt;"
-    /// would be misleading for event classes (no instances), and a "WHERE Name=..." query on
-    /// Meta_Class is unreliable on root\wmi, so full enumeration is used.
+    /// Checks whether a WMI class exists in root\wmi by attempting an instance query on it.
+    /// If the class does not exist, the query throws WBEM_E_NOT_FOUND; if it exists the query
+    /// succeeds even with zero rows (which is the normal case for event classes).
     /// </summary>
     public static bool WmiClassExists(string className)
     {
@@ -57,20 +62,22 @@ public sealed class BrightnessWatcher : IDisposable
         {
             using var searcher = new ManagementObjectSearcher(
                 @"root\wmi",
-                "SELECT Name FROM Meta_Class");
+                $"SELECT * FROM {className}");
             using var results = searcher.Get();
-            foreach (ManagementBaseObject item in results)
-            {
-                string? name = item["Name"]?.ToString();
-                if (string.Equals(name, className, StringComparison.OrdinalIgnoreCase))
-                    return true;
-            }
+            // Force enumeration so a missing class surfaces as an exception.
+            foreach (ManagementBaseObject _ in results) { }
+            return true;
+        }
+        catch (ManagementException ex) when (
+            ex.ErrorCode == ManagementStatus.NotFound ||
+            ex.ErrorCode == ManagementStatus.InvalidClass)
+        {
+            return false;
         }
         catch
         {
             return false;
         }
-        return false;
     }
 
     /// <summary>
@@ -156,12 +163,14 @@ public sealed class BrightnessWatcher : IDisposable
             _watcher.EventArrived += OnBrightnessEventArrived;
             _watcher.Stopped += OnWatcherStopped;
             _watcher.Start();
+            WmiWatcherAlive = true;
             _logger.LogInformation("Subscribed to WMI brightness events (WmiMonitorBrightnessEvent).");
         }
         catch (Exception ex)
         {
             _watcher?.Dispose();
             _watcher = null;
+            WmiWatcherAlive = false;
             _logger.LogWarning(ex, "Could not subscribe to WMI brightness events: {Message}", ex.Message);
         }
     }
@@ -327,6 +336,7 @@ public sealed class BrightnessWatcher : IDisposable
             try { watcher.Stop(); } catch { /* already stopped */ }
             watcher.Dispose();
         }
+        WmiWatcherAlive = false;
     }
 
     /// <summary>
@@ -501,7 +511,8 @@ public sealed class BrightnessWatcher : IDisposable
 
     private void OnWatcherStopped(object sender, StoppedEventArgs e)
     {
-        _logger.LogWarning("WMI event watcher stopped (status: {Status}).", e.Status);
+        WmiWatcherAlive = false;
+        _logger.LogWarning("WMI event watcher stopped (status: {Status}) — it will be restarted on the next poll.", e.Status);
     }
 
     public void Dispose() => Stop();

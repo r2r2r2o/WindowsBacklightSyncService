@@ -55,6 +55,7 @@ if (fileLoggerOptions.Enabled)
 }
 
 builder.Services.AddSingleton<BrightnessWatcher>();
+builder.Services.AddSingleton<PowerEventMonitor>();
 builder.Services.AddSingleton<IPowerPlanBrightnessWriter, PowerPlanBrightnessWriter>();
 builder.Services.AddSingleton<Diagnostics>();
 builder.Services.AddHostedService<BacklightSyncWorker>();

@@ -9,7 +9,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>BacklightSyncService</RootNamespace>
     <AssemblyName>BacklightSyncService</AssemblyName>
-    <Version>1.3.5</Version>
+    <Version>1.4.0</Version>
     <!-- Allows building (compile check) on non-Windows machines; ignored on Windows. -->
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
   </PropertyGroup>

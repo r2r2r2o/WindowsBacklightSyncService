@@ -14,6 +14,7 @@ public sealed class BacklightSyncWorker : BackgroundService
     private readonly IOptionsMonitor<BacklightSyncOptions> _options;
     private readonly IPowerPlanBrightnessWriter _writer;
     private readonly BrightnessWatcher _watcher;
+    private readonly PowerEventMonitor _powerEventMonitor;
     private readonly Diagnostics _diagnostics;
 
     private readonly object _gate = new();
@@ -22,6 +23,7 @@ public sealed class BacklightSyncWorker : BackgroundService
     private int _lastAppliedBrightness = -1;
     private int _lastObservedBrightness = -1;
     private long _lastApplyTick;
+    private long _lastPeriodicCheckTick;
     private bool _pollFailureLogged;
     private long _syncCount;
     private long _eventCount;
@@ -35,12 +37,14 @@ public sealed class BacklightSyncWorker : BackgroundService
         IOptionsMonitor<BacklightSyncOptions> options,
         IPowerPlanBrightnessWriter writer,
         BrightnessWatcher watcher,
+        PowerEventMonitor powerEventMonitor,
         Diagnostics diagnostics)
     {
         _logger = logger;
         _options = options;
         _writer = writer;
         _watcher = watcher;
+        _powerEventMonitor = powerEventMonitor;
         _diagnostics = diagnostics;
     }
 
@@ -57,16 +61,9 @@ public sealed class BacklightSyncWorker : BackgroundService
             opts.ReapplyActiveScheme, opts.IgnoreAdaptiveChanges, opts.SuppressEventsAfterApplyMilliseconds);
 
         _watcher.BrightnessChanged += OnBrightnessChanged;
+        _powerEventMonitor.Resumed += OnSystemResumed;
+        _powerEventMonitor.Start();
         _watcher.Start();
-
-        // Registry fallback: when the driver exposes no WMI brightness events (Intel HD 3000
-        // on Windows 10 does not), the registry watch still fires — but it needs explicit
-        // polling to bridge the gap and to emit the initial state. Polling is cheap.
-        bool registryFallbackActive = BrightnessWatcher.RegistryBrightnessKeyExists();
-        if (registryFallbackActive)
-        {
-            _logger.LogInformation("Registry brightness fallback active — watching HKCU\\{Path}.", BrightnessWatcher.BrightnessRegistryKeyPath);
-        }
 
         // Environment snapshot at startup — always available in the log file.
         try
@@ -123,12 +120,45 @@ public sealed class BacklightSyncWorker : BackgroundService
         finally
         {
             _watcher.BrightnessChanged -= OnBrightnessChanged;
+            _powerEventMonitor.Resumed -= OnSystemResumed;
             _watcher.Stop();
+            _powerEventMonitor.Dispose();
         }
 
         _logger.LogInformation(
             "Backlight sync stopped. WMI events seen: {Events}, syncs performed: {Syncs}.",
             Interlocked.Read(ref _eventCount), Interlocked.Read(ref _syncCount));
+    }
+
+    /// <summary>
+    /// The system woke up. Re-establish every change-detection signal (WMI subscriptions can
+    /// silently die during sleep) and re-sync: Windows may have changed the brightness while
+    /// the machine was asleep (e.g. AC/DC transition), so push the current value everywhere.
+    /// </summary>
+    private void OnSystemResumed()
+    {
+        try
+        {
+            _logger.LogInformation("Post-resume: re-establishing brightness signals.");
+            _watcher.Stop();
+            _watcher.Start();
+
+            int? current = BrightnessWatcher.ReadCurrentBrightness();
+            if (current is { } c)
+            {
+                _logger.LogInformation("Post-resume sync: brightness {Brightness}% — writing to all plans.", c);
+                _lastObservedBrightness = c;
+                ApplyBrightness(c, force: true);
+            }
+            else
+            {
+                _logger.LogWarning("Post-resume: could not read the current brightness.");
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Post-resume re-sync failed: {Message}", ex.Message);
+        }
     }
 
     /// <summary>
@@ -139,6 +169,22 @@ public sealed class BacklightSyncWorker : BackgroundService
     {
         try
         {
+            // Self-healing: if the WMI event subscription died (e.g. after sleep/wake),
+            // restart it so event-driven syncs resume instead of relying on polling alone.
+            if (!_watcher.WmiWatcherAlive)
+            {
+                _logger.LogWarning("WMI event subscription is not alive — restarting it.");
+                try
+                {
+                    _watcher.Stop();
+                    _watcher.Start();
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "WMI event subscription restart failed (will retry on next poll).");
+                }
+            }
+
             int? current = BrightnessWatcher.ReadCurrentBrightness();
             _pollCount++;
             _logger.LogDebug(
@@ -153,14 +199,35 @@ public sealed class BacklightSyncWorker : BackgroundService
                     _lastObservedBrightness = c;
                     OnBrightnessChanged(c, adaptive: false);
                 }
-                else if (_pollCount % 20 == 0)
+                else
                 {
-                    // Debug level: heartbeat is for log-file diagnosis, not for the Event Log.
-                    _logger.LogDebug(
-                        "Heartbeat: brightness={Brightness}%, events={Events}, syncs={Syncs}, lastSync={LastSync} ({LastBrightness}%), schemes={Schemes}",
-                        c, Interlocked.Read(ref _eventCount), Interlocked.Read(ref _syncCount),
-                        _lastSyncTime == default ? "never" : _lastSyncTime.ToString("HH:mm:ss"),
-                        _lastSyncBrightness, _lastSchemeCount);
+                    if (_pollCount % 20 == 0)
+                    {
+                        // Debug level: heartbeat is for log-file diagnosis, not for the Event Log.
+                        _logger.LogDebug(
+                            "Heartbeat: brightness={Brightness}%, events={Events}, syncs={Syncs}, lastSync={LastSync} ({LastBrightness}%), schemes={Schemes}",
+                            c, Interlocked.Read(ref _eventCount), Interlocked.Read(ref _syncCount),
+                            _lastSyncTime == default ? "never" : _lastSyncTime.ToString("HH:mm:ss"),
+                            _lastSyncBrightness, _lastSchemeCount);
+                    }
+
+                    // Periodic self-healing: if the screen and the stored plan values drifted
+                    // apart without any event (e.g. Windows changed brightness during sleep),
+                    // re-sync. Normally nothing happens here because everything already matches.
+                    var opts = _options.CurrentValue;
+                    if (opts.PeriodicResyncSeconds > 0
+                        && Environment.TickCount64 - _lastPeriodicCheckTick >= opts.PeriodicResyncSeconds * 1000L)
+                    {
+                        _lastPeriodicCheckTick = Environment.TickCount64;
+                        if (c != _lastAppliedBrightness)
+                        {
+                            _logger.LogInformation(
+                                "Periodic check: screen is {Brightness}% but last applied was {Last}% — re-syncing all plans.",
+                                c, _lastAppliedBrightness);
+                            _lastObservedBrightness = c;
+                            ApplyBrightness(c, force: true);
+                        }
+                    }
                 }
             }
         }
