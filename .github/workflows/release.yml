@@ -1,10 +1,17 @@
-# Builds the service and publishes a GitHub Release with the compiled binaries.
+# Builds the service and publishes a GitHub Release with TWO zip bundles:
+#
+#   1. BacklightSyncService-v<ver>-win-x64-selfcontained.zip
+#        - self-contained: carries its own .NET runtime, runs on any Windows 10/11
+#        - larger (~70 MB)
+#   2. BacklightSyncService-v<ver>-win-x64-frameworkdependent.zip
+#        - framework-dependent: requires the .NET 10 Runtime installed on the target
+#        - much smaller (a few hundred KB)
 #
 # Trigger: push a version tag, e.g.  git tag v1.4.0 && git push origin v1.4.0
 # (or run manually from the Actions tab — the version is then read from the csproj).
 #
-# The release zip contains the self-contained win-x64 binaries in a "publish"
-# folder together with scripts\install.ps1, so installing a release is:
+# Both zips contain the binaries in a "publish" folder together with
+# scripts\install.ps1, so installing a release is:
 #   download zip -> extract -> run publish\scripts\install.ps1 (elevated)
 
 name: Release
@@ -30,20 +37,32 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
+      # --- Self-contained build: no .NET runtime needed on the target machine ---
       - name: Publish (self-contained win-x64)
         run: dotnet publish BacklightSyncService.csproj -c Release -r win-x64 --self-contained true -o publish
 
-      - name: Smoke test (--check)
+      # --- Framework-dependent build: needs .NET 10 Runtime on the target ---
+      - name: Publish (framework-dependent win-x64)
+        run: dotnet publish BacklightSyncService.csproj -c Release -r win-x64 --self-contained false -o publish-fd
+
+      - name: Smoke test (self-contained --check)
         run: .\publish\BacklightSyncService.exe --check
         shell: pwsh
 
-      # Make the release bundle self-contained: install script + docs next to the exe.
-      - name: Stage release bundle
+      - name: Smoke test (framework-dependent --check)
+        run: .\publish-fd\BacklightSyncService.exe --check
+        shell: pwsh
+
+      # Make both bundles self-contained in the install-script sense: put
+      # scripts + docs next to each exe.
+      - name: Stage release bundles
         shell: pwsh
         run: |
-          Copy-Item -Path scripts -Destination publish\scripts -Recurse -Force
-          Copy-Item -Path README.md -Destination publish\README.md -Force
-          if (Test-Path LICENSE.txt) { Copy-Item -Path LICENSE.txt -Destination publish\LICENSE.txt -Force }
+          foreach ($dir in @('publish', 'publish-fd')) {
+            Copy-Item -Path scripts -Destination "$dir\scripts" -Recurse -Force
+            Copy-Item -Path README.md -Destination "$dir\README.md" -Force
+            if (Test-Path LICENSE.txt) { Copy-Item -Path LICENSE.txt -Destination "$dir\LICENSE.txt" -Force }
+          }
 
       - name: Determine version
         id: version
@@ -61,16 +80,23 @@ jobs:
           Write-Host "Release version: v$version"
           "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
-      - name: Create zip
+      - name: Create zips + checksums
         shell: pwsh
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          $zip = "BacklightSyncService-v$env:VERSION-win-x64.zip"
-          Compress-Archive -Path publish -DestinationPath $zip -CompressionLevel Optimal
-          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash
-          "$hash  $zip" | Set-Content -Path "$zip.sha256"
-          Write-Host "Created $zip"
+          $names = @(
+            "BacklightSyncService-v$env:VERSION-win-x64-selfcontained",
+            "BacklightSyncService-v$env:VERSION-win-x64-frameworkdependent"
+          )
+          $srcDirs = @('publish', 'publish-fd')
+          for ($i = 0; $i -lt $names.Count; $i++) {
+            $zip = "$($names[$i]).zip"
+            Compress-Archive -Path $srcDirs[$i] -DestinationPath $zip -CompressionLevel Optimal
+            $hash = (Get-FileHash $zip -Algorithm SHA256).Hash
+            "$hash  $zip" | Set-Content -Path "$zip.sha256"
+            Write-Host "Created $zip"
+          }
 
       - name: Create GitHub Release
         shell: pwsh
@@ -78,12 +104,20 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          $zip = "BacklightSyncService-v$env:VERSION-win-x64.zip"
+          $zips = @(
+            "BacklightSyncService-v$env:VERSION-win-x64-selfcontained.zip",
+            "BacklightSyncService-v$env:VERSION-win-x64-frameworkdependent.zip"
+          )
           gh release view "v$env:VERSION" 2>$null | Out-Null
           if ($LASTEXITCODE -eq 0) {
             Write-Host "Release v$env:VERSION already exists — deleting and recreating."
             gh release delete "v$env:VERSION" --yes --cleanup-tag
           }
-          gh release create "v$env:VERSION" $zip "$zip.sha256" `
+          $assets = @()
+          foreach ($zip in $zips) {
+            $assets += $zip
+            $assets += "$zip.sha256"
+          }
+          gh release create "v$env:VERSION" @assets `
             --title "BacklightSyncService v$env:VERSION" `
             --generate-notes

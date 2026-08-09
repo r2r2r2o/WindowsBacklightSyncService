@@ -161,17 +161,20 @@ git tag v1.4.1
 git push origin v1.4.1
 ```
 
-The `Release` workflow then: builds the self-contained win-x64 binaries → runs the `--check` smoke test → bundles them into `BacklightSyncService-v1.4.1-win-x64.zip` (with `scripts\install.ps1`, `README.md` and `LICENSE.txt` next to the exe) → computes a SHA-256 checksum → creates a GitHub Release **v1.4.1** with auto-generated notes and both files attached.
+The `Release` workflow then: builds **two** win-x64 variants → runs the `--check` smoke test on both → bundles each with `scripts\install.ps1`, `README.md` and `LICENSE.txt` → computes SHA-256 checksums → creates a GitHub Release **v1.4.1** with auto-generated notes and both zips (+ checksums) attached.
 
-> The workflow verifies the tag matches `<Version>` in the csproj and aborts if they differ. If you want a release without pushing a tag, run the workflow manually from the Actions tab — the version is then read from the csproj.
+### Which zip should I download?
 
-**Installing a release on the target machine:**
+| Zip | Size | Requires | Use when |
+|---|---|---|---|
+| `...-selfcontained.zip` | ~70 MB | nothing | The default — works on any Windows 10/11, no .NET installed needed. **Pick this for the T520.** |
+| `...-frameworkdependent.zip` | ~200 KB | .NET 10 Runtime on the target | The machine already has .NET 10, or you manage runtimes centrally (e.g. via WSUS/Intune). |
+
+Both install identically:
 
 ```powershell
-# download BacklightSyncService-v1.4.1-win-x64.zip from the release page,
-# optionally verify the checksum, then in an elevated PowerShell:
-Expand-Archive BacklightSyncService-v1.4.1-win-x64.zip -DestinationPath .
-.\publish\scripts\install.ps1
+Expand-Archive BacklightSyncService-v1.4.1-win-x64-selfcontained.zip -DestinationPath .
+.\publish\scripts\install.ps1   # elevated
 ```
 
-(Verify with `Get-FileHash BacklightSyncService-v1.4.1-win-x64.zip -Algorithm SHA256` and compare against the `.sha256` file attached to the release.)
+(Verify with `Get-FileHash ... -Algorithm SHA256` against the matching `.sha256` file attached to the release.)
