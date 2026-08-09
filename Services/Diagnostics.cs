@@ -97,6 +97,9 @@ public sealed class Diagnostics
             active = _writer.GetActiveScheme();
             if (active is { } a)
                 Out($"Active plan: {a:D}");
+
+                bool dimFilter = !bool.TryParse(_configuration["BacklightSync:IgnoreSystemDimming"], out bool dimConfigured) || dimConfigured;
+                Out($"Dim filter : IgnoreSystemDimming={dimFilter} — system-initiated changes (inactivity dim, battery saver) that don't match the active plan's stored level are ignored.");
         }
         catch (Exception ex)
         {

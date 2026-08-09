@@ -55,10 +55,10 @@ public sealed class BacklightSyncWorker : BackgroundService
             "Backlight sync starting. OS={Os}, user={User}, elevated={Elevated}, x64={X64}",
             Environment.OSVersion, WindowsIdentity.GetCurrent()?.Name ?? "?", IsElevated(), Environment.Is64BitProcess);
         _logger.LogInformation(
-            "Configuration: debounce={Debounce}ms, polling={Poll}s, initialSync={Initial}, syncAC={Ac}, syncDC={Dc}, writeOnlyWhenChanged={Woc}, reapplyActive={Reapply}, ignoreAdaptive={IgnoreAdaptive}, suppressAfterApply={Suppress}ms",
+            "Configuration: debounce={Debounce}ms, polling={Poll}s, initialSync={Initial}, syncAC={Ac}, syncDC={Dc}, writeOnlyWhenChanged={Woc}, reapplyActive={Reapply}, ignoreAdaptive={IgnoreAdaptive}, ignoreSystemDimming={IgnoreSystemDim}, suppressAfterApply={Suppress}ms",
             opts.DebounceMilliseconds, opts.PollingIntervalSeconds, opts.InitialSyncOnStart,
             opts.SyncAcValue, opts.SyncDcValue, opts.WriteOnlyWhenChanged,
-            opts.ReapplyActiveScheme, opts.IgnoreAdaptiveChanges, opts.SuppressEventsAfterApplyMilliseconds);
+            opts.ReapplyActiveScheme, opts.IgnoreAdaptiveChanges, opts.IgnoreSystemDimming, opts.SuppressEventsAfterApplyMilliseconds);
 
         _watcher.BrightnessChanged += OnBrightnessChanged;
         _powerEventMonitor.Resumed += OnSystemResumed;
@@ -219,7 +219,9 @@ public sealed class BacklightSyncWorker : BackgroundService
                         && Environment.TickCount64 - _lastPeriodicCheckTick >= opts.PeriodicResyncSeconds * 1000L)
                     {
                         _lastPeriodicCheckTick = Environment.TickCount64;
-                        if (c != _lastAppliedBrightness)
+                        // Don't "heal" a drift caused by system dimming — that's expected
+                        // and handled by the dim filter; only re-sync genuine mismatches.
+                        if (c != _lastAppliedBrightness && !IsSystemInitiatedChange(c))
                         {
                             _logger.LogInformation(
                                 "Periodic check: screen is {Brightness}% but last applied was {Last}% — re-syncing all plans.",
@@ -277,14 +279,8 @@ public sealed class BacklightSyncWorker : BackgroundService
 
         lock (_gate)
         {
-            // Debounce: cancel and dispose any previous token source, then schedule a new one.
-            var previous = _debounceCts;
-            if (previous is not null)
-            {
-                try { previous.Cancel(); } catch { }
-                try { previous.Dispose(); } catch { }
-            }
-
+            // Debounce: a rapid series of changes (e.g. slider drag) collapses into one sync.
+            _debounceCts?.Cancel();
             var cts = new CancellationTokenSource();
             _debounceCts = cts;
             _logger.LogTrace("Debounce scheduled: {Brightness}% in {Delay}ms.", brightness, opts.DebounceMilliseconds);
@@ -307,16 +303,6 @@ public sealed class BacklightSyncWorker : BackgroundService
                 {
                     _logger.LogError(ex, "Brightness synchronization failed: {Message}", ex.Message);
                 }
-                finally
-                {
-                    // Clear and dispose the CTS we created if it's still the active one.
-                    lock (_gate)
-                    {
-                        if (_debounceCts == cts)
-                            _debounceCts = null;
-                    }
-                    try { cts.Dispose(); } catch { }
-                }
             }, cts.Token);
         }
     }
@@ -327,6 +313,46 @@ public sealed class BacklightSyncWorker : BackgroundService
         if (lastTick == 0)
             return false;
         return Environment.TickCount64 - lastTick < opts.SuppressEventsAfterApplyMilliseconds;
+    }
+
+    /// <summary>
+    /// True when the incoming brightness level is likely system-initiated — the screen
+    /// dimming after inactivity, its restore, or battery-saver dimming. Discriminator:
+    /// Windows records deliberate user changes (brightness keys, slider) in the ACTIVE
+    /// plan's stored brightness, but system dimming changes only the screen level.
+    /// Therefore a level that matches the active plan's stored AC or DC value is treated
+    /// as user-initiated; anything else as system-initiated. Fails open: if the plan
+    /// cannot be read, the change is treated as user-initiated.
+    /// </summary>
+    private bool IsSystemInitiatedChange(int brightnessPercent)
+    {
+        if (!_options.CurrentValue.IgnoreSystemDimming)
+            return false;
+
+        try
+        {
+            Guid? active = _writer.GetActiveScheme();
+            if (active is null)
+                return false;
+
+            int? acStored = _writer.ReadBrightnessValue(active.Value, ac: true);
+            int? dcStored = _writer.ReadBrightnessValue(active.Value, ac: false);
+            if (acStored is null && dcStored is null)
+                return false;
+
+            if (acStored == brightnessPercent || dcStored == brightnessPercent)
+                return false;
+
+            _logger.LogDebug(
+                "Brightness {Brightness}% does not match the active plan's stored level (AC={Ac}, DC={Dc}) — system-initiated (inactivity dim / battery saver).",
+                brightnessPercent, acStored?.ToString() ?? "?", dcStored?.ToString() ?? "?");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Could not evaluate the system-dimming filter — processing the change anyway.");
+            return false;
+        }
     }
 
     /// <summary>
@@ -366,6 +392,18 @@ public sealed class BacklightSyncWorker : BackgroundService
             if (!force && brightnessPercent == _lastAppliedBrightness)
             {
                 _logger.LogTrace("Brightness {Brightness}% already synchronized (last applied); skipping.", brightnessPercent);
+                return;
+            }
+
+            // Only deliberate user changes are synchronized. System dimming (inactivity,
+            // battery saver) and the restore after it change the screen level without
+            // touching the active plan's stored value — those are filtered out here for
+            // every sync path (events, polling, initial, post-resume, periodic).
+            if (IsSystemInitiatedChange(brightnessPercent))
+            {
+                _logger.LogInformation(
+                    "Ignoring brightness change to {Brightness}% — system-initiated (inactivity dim / battery saver / restore); it does not match the active plan's stored level.",
+                    brightnessPercent);
                 return;
             }
 
@@ -490,13 +528,8 @@ public sealed class BacklightSyncWorker : BackgroundService
         _logger.LogInformation("Stop requested — cancelling pending debounce.");
         lock (_gate)
         {
-            var cts = _debounceCts;
-            if (cts is not null)
-            {
-                try { cts.Cancel(); } catch { }
-                try { cts.Dispose(); } catch { }
-                _debounceCts = null;
-            }
+            _debounceCts?.Cancel();
+            _debounceCts = null;
         }
         await base.StopAsync(cancellationToken);
     }

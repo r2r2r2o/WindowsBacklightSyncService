@@ -46,6 +46,15 @@ public sealed class BacklightSyncOptions
     public bool IgnoreAdaptiveChanges { get; set; } = false;
 
     /// <summary>
+    /// Ignore system-initiated brightness changes — the screen dimming after inactivity,
+    /// its restore, and battery-saver dimming. Deliberate user changes (brightness keys,
+    /// slider) are recorded by Windows in the ACTIVE plan's stored brightness, while
+    /// system dimming is not; the service treats any incoming level that does not match
+    /// the active plan's stored level as system-initiated and skips it.
+    /// </summary>
+    public bool IgnoreSystemDimming { get; set; } = true;
+
+    /// <summary>
     /// How often (seconds) the self-healing check runs: verifies the screen brightness still
     /// matches the stored plan values and re-syncs if they drifted (e.g. brightness changed
     /// during sleep/wake without an event). 0 disables the check.

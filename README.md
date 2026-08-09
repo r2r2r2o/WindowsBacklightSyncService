@@ -32,6 +32,7 @@ That's it. The service installs itself, starts automatically at boot, and runs a
 2. **It syncs.** When a change is detected, the service writes the new level into the **AC** (plugged-in) and **DC** (on-battery) brightness value of **every** power plan — the built-in ones *and* custom plans you created yourself.
 3. **It writes only when needed.** Plans that already have the right value are skipped, and the active plan is re-applied so the change takes effect immediately.
 4. **It's gentle with rapid changes.** A slider drag from 100% to 20% fires dozens of events; they're debounced into a single clean sync.
+5. **It ignores system dimming.** Windows dims the screen by itself after inactivity and restores it when you return (and battery saver dims it too). Those changes are **not** synced — only deliberate user changes are. The service knows the difference because Windows records user-set brightness in the *active* plan's stored value, while system dimming never touches it: any level that doesn't match the active plan's stored level is treated as system-initiated and skipped. (Disable via `IgnoreSystemDimming: false`.)
 
 ## Sleep & wake — handled
 
@@ -57,6 +58,7 @@ All settings live in `appsettings.json` under the `BacklightSync` section (or as
 | `WriteOnlyWhenChanged` | `true` | Skips plans that already store the target value |
 | `ReapplyActiveScheme` | `true` | Re-applies the active plan after writing (like `powercfg /setactive`) |
 | `IgnoreAdaptiveChanges` | `false` | Ignores sensor-driven (auto) brightness changes |
+| `IgnoreSystemDimming` | `true` | Ignores system-initiated changes (inactivity dim + restore, battery saver) — only deliberate user changes are synced |
 | `SuppressEventsAfterApplyMilliseconds` | `1000` | Loop protection after a sync — only filters events with the *same* value; real changes always get through |
 | `PeriodicResyncSeconds` | `60` | How often the self-healing drift check runs; `0` disables it |
 
@@ -105,6 +107,8 @@ Turn it back off the same way when you're done. The **Event Log** (Event Viewer 
 | Nothing syncs at all | Is the service running? (`Get-Service WindowsBacklightSyncService`) Check the Event Log for errors and run `--check`. |
 | `install.ps1` aborts with "STALE BUILD DETECTED" | You forgot to republish — run `dotnet publish ...` again, then reinstall. |
 | Brightness jumps when switching plans | The sync is debounced by half a second — give it a second after changing brightness before switching plans. |
+| Screen dims after inactivity but the plans don't follow | **By design** (`IgnoreSystemDimming: true`) — system dimming and its restore are not user changes and aren't synced. Set `IgnoreSystemDimming: false` if you want the dim level synced too. |
+| A deliberate brightness change isn't synced | Windows must first record it in the active plan (it normally does within ~1 s). If it doesn't on your driver, the poll/periodic check picks it up — or set `IgnoreSystemDimming: false`. |
 | Log file says "Access denied" | The file was created by the service (LocalSystem); run your console elevated, or let it fall back to `%LOCALAPPDATA%` automatically. |
 | After wake-up, plans were out of sync | Shouldn't happen anymore (v1.4.0): the service re-syncs on resume and heals drift every 60 s. If you still see it, check the log for "Post-resume" lines. |
 
