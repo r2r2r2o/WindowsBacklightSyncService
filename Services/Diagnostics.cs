@@ -56,7 +56,17 @@ public sealed class Diagnostics
         Out($"Time      : {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
         Out($"OS        : {Environment.OSVersion}");
         Out($"Process   : {Environment.ProcessPath ?? "?"} (x64: {Environment.Is64BitProcess})");
-        Out($"User      : {WindowsIdentity.GetCurrent()?.Name ?? "?"} (elevated: {IsElevated()})");
+        string userLine;
+        try
+        {
+            userLine = $"{WindowsIdentity.GetCurrent()?.Name ?? "?"} (elevated: {IsElevated()})";
+        }
+        catch (Exception ex)
+        {
+            // WindowsIdentity can be unavailable in exotic contexts — the snapshot must never crash.
+            userLine = $"unavailable ({ex.GetType().Name})";
+        }
+        Out($"User      : {userLine}");
         Out($"Power     : {ReadPowerState()}");
         string? logPath = _configuration["Logging:File:Path"];
         Out($"Log file  : {(string.IsNullOrWhiteSpace(logPath) ? "(default)" : Environment.ExpandEnvironmentVariables(logPath))}");

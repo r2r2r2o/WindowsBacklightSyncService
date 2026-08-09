@@ -41,7 +41,7 @@ builder.Services.Configure<BacklightSyncOptions>(builder.Configuration.GetSectio
 var fileLoggerOptions = FileLoggerOptions.FromConfiguration(builder.Configuration);
 if (fileLoggerOptions.Enabled)
 {
-    var fileLoggerProvider = new FileLoggerProvider(fileLoggerOptions, BuildFileFilter(builder.Configuration));
+    var fileLoggerProvider = new FileLoggerProvider(fileLoggerOptions, LogFilterBuilder.Build(builder.Configuration));
     builder.Logging.AddProvider(fileLoggerProvider);
 
     if (fileLoggerProvider.ActivePath is null)
@@ -84,33 +84,6 @@ catch (Exception ex)
     // way (console + Event Log) and exit non-zero.
     ReportDiagnostic($"Fatal error: {ex}");
     return 1;
-}
-
-// Builds the per-category level filter for the file logger from "Logging:File:LogLevel".
-static Func<string, LogLevel, bool> BuildFileFilter(IConfiguration configuration)
-{
-    var levels = new Dictionary<string, LogLevel>(StringComparer.OrdinalIgnoreCase);
-    foreach (IConfigurationSection child in configuration.GetSection("Logging:File:LogLevel").GetChildren())
-    {
-        if (Enum.TryParse<LogLevel>(child.Value, ignoreCase: true, out LogLevel level))
-            levels[child.Key] = level;
-    }
-    if (!levels.ContainsKey("Default"))
-        levels["Default"] = LogLevel.Debug;
-
-    return (category, level) =>
-    {
-        // Walk the category namespace chain: "WindowsBacklightSyncService.Services.X" -> ... -> "Default".
-        string current = category;
-        while (!string.IsNullOrEmpty(current))
-        {
-            if (levels.TryGetValue(current, out LogLevel configured))
-                return level >= configured;
-            int idx = current.LastIndexOf('.');
-            current = idx > 0 ? current[..idx] : string.Empty;
-        }
-        return level >= levels["Default"];
-    };
 }
 
 // Best-effort reporting of logger/configuration problems: console (when run interactively)

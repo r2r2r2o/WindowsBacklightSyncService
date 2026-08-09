@@ -476,20 +476,27 @@ public sealed class BrightnessWatcher : IDisposable
     {
         try
         {
-            string mof = e.NewEvent.GetText(TextFormat.Mof);
-            Match match = Regex.Match(mof, @"Brightness\s*=\s*(\d{1,3})", RegexOptions.IgnoreCase);
-            if (match.Success)
-            {
-                int value = int.Parse(match.Groups[1].Value);
-                if (value >= 0 && value <= 100)
-                    return value;
-            }
+            return ParseBrightnessFromMofText(e.NewEvent.GetText(TextFormat.Mof));
         }
         catch
         {
             // fall through
         }
         return null;
+    }
+
+    /// <summary>
+    /// Extracts the brightness value (0-100) from a WMI event's MOF text representation.
+    /// Tolerates driver-specific formatting (case, whitespace). Pure — unit-testable.
+    /// </summary>
+    internal static int? ParseBrightnessFromMofText(string mof)
+    {
+        Match match = Regex.Match(mof, @"Brightness\s*=\s*(\d{1,3})", RegexOptions.IgnoreCase);
+        if (!match.Success)
+            return null;
+
+        int value = int.Parse(match.Groups[1].Value);
+        return value is >= 0 and <= 100 ? value : null;
     }
 
     private void LogEventSchema(EventArrivedEventArgs e)

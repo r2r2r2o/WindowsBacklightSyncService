@@ -123,10 +123,14 @@ Turn it back off the same way when you're done. The **Event Log** (Event Viewer 
 
 ## Testing
 
-Unit tests live in `WindowsBacklightSyncService.Tests` (xUnit). They cover the decision logic (system-dimming filter, loop protection, adaptive ignore, per-plan write decisions), the worker's sync behavior against an in-memory plan writer (no hardware or WMI needed), and the file logger (writes, rotation, fallback). Run them with:
+Unit tests live in `WindowsBacklightSyncService.Tests` (xUnit, no hardware or WMI needed — everything runs against in-memory fakes). Coverage includes: the decision logic (system-dimming filter, loop protection, adaptive ignore, per-plan write decisions), the worker's sync behavior (debounce collapse, force, clamping, per-index AC/DC writes, failure handling, re-apply rules), configuration binding (code defaults vs. `appsettings.json`), the file logger (writes, rotation, pruning, fallback, filtering, exception details, concurrent read), the log-filter category chain, the WMI MOF parser, and the `--check` snapshot.
 
 ```powershell
+# run the tests
 dotnet test WindowsBacklightSyncService.Tests\WindowsBacklightSyncService.Tests.csproj -c Release
+
+# run with a coverage report (coverlet; produces TestResults\*\coverage.cobertura.xml)
+dotnet test WindowsBacklightSyncService.Tests\WindowsBacklightSyncService.Tests.csproj -c Release --collect:"XPlat Code Coverage"
 ```
 
 Both GitHub Actions workflows run the tests on every build; a release is not produced unless they pass.

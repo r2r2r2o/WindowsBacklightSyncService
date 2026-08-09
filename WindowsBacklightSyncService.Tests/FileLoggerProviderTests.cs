@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using WindowsBacklightSyncService.Services;
 using Xunit;
@@ -122,5 +123,128 @@ public class FileLoggerProviderTests
         logger.LogInformation("must not throw");
 
         Assert.True(true); // reached without exception
+    }
+
+    // ---------- FromConfiguration ----------
+
+    [Fact]
+    public void FromConfiguration_ParsesAllKeys()
+    {
+        string json = """
+            {
+              "Logging": {
+                "File": {
+                  "Enabled": true,
+                  "Path": "C:\\custom\\dir\\my.log",
+                  "MaxSizeBytes": 12345,
+                  "MaxBackupFiles": 7
+                }
+              }
+            }
+            """;
+        var config = new Microsoft.Extensions.Configuration.ConfigurationBuilder()
+            .AddJsonStream(new MemoryStream(System.Text.Encoding.UTF8.GetBytes(json)))
+            .Build();
+
+        var options = FileLoggerOptions.FromConfiguration(config);
+
+        Assert.True(options.Enabled);
+        Assert.Equal(@"C:\custom\dir\my.log", options.Path);
+        Assert.Equal(12345, options.MaxSizeBytes);
+        Assert.Equal(7, options.MaxBackupFiles);
+    }
+
+    [Fact]
+    public void FromConfiguration_Defaults_WhenSectionMissing()
+    {
+        var config = new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build();
+        var options = FileLoggerOptions.FromConfiguration(config);
+
+        Assert.False(options.Enabled); // production default: off
+        Assert.Contains("%ProgramData%", options.Path);
+        Assert.Equal(5 * 1024 * 1024, options.MaxSizeBytes);
+        Assert.Equal(3, options.MaxBackupFiles);
+    }
+
+    [Fact]
+    public void FromConfiguration_InvalidValues_AreIgnored()
+    {
+        string json = """
+            { "Logging": { "File": { "Enabled": "not-a-bool", "MaxSizeBytes": "-5", "MaxBackupFiles": "x" } } }
+            """;
+        var config = new Microsoft.Extensions.Configuration.ConfigurationBuilder()
+            .AddJsonStream(new MemoryStream(System.Text.Encoding.UTF8.GetBytes(json)))
+            .Build();
+
+        var options = FileLoggerOptions.FromConfiguration(config);
+
+        Assert.False(options.Enabled);          // unparsable -> default
+        Assert.Equal(5 * 1024 * 1024, options.MaxSizeBytes);
+        Assert.Equal(3, options.MaxBackupFiles);
+    }
+
+    // ---------- Logging behavior ----------
+
+    [Fact]
+    public void RespectsLevelFilter()
+    {
+        string logFile = Path.Combine(Path.GetTempPath(), "bls-test-" + Guid.NewGuid().ToString("N") + ".log");
+        using (var provider = new FileLoggerProvider(Options(logFile), (_, level) => level >= LogLevel.Warning))
+        {
+            var logger = provider.CreateLogger("Test");
+            logger.LogInformation("info line"); // filtered out
+            logger.LogWarning("warn line");     // passes
+            logger.LogError("error line");      // passes
+        }
+
+        string content = File.ReadAllText(logFile);
+        Assert.DoesNotContain("info line", content);
+        Assert.Contains("warn line", content);
+        Assert.Contains("error line", content);
+    }
+
+    [Fact]
+    public void IncludesExceptionDetails()
+    {
+        string logFile = Path.Combine(Path.GetTempPath(), "bls-test-" + Guid.NewGuid().ToString("N") + ".log");
+        using (var provider = new FileLoggerProvider(Options(logFile), AcceptAll))
+        {
+            var logger = provider.CreateLogger("Test");
+            logger.LogError(new InvalidOperationException("boom"), "sync failed");
+        }
+
+        string content = File.ReadAllText(logFile);
+        Assert.Contains("sync failed", content);
+        Assert.Contains("InvalidOperationException", content);
+        Assert.Contains("boom", content);
+    }
+
+    [Fact]
+    public void IncludesLevelCodeAndTimestamp()
+    {
+        string logFile = Path.Combine(Path.GetTempPath(), "bls-test-" + Guid.NewGuid().ToString("N") + ".log");
+        using (var provider = new FileLoggerProvider(Options(logFile), AcceptAll))
+        {
+            provider.CreateLogger("Test").LogInformation("hello");
+        }
+
+        string line = File.ReadAllLines(logFile).Single();
+        Assert.Contains("[INF]", line);
+        Assert.Matches(@"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}", line);
+    }
+
+    [Fact]
+    public void FileCanBeReadWhileLogging_FileShareReadWrite()
+    {
+        string logFile = Path.Combine(Path.GetTempPath(), "bls-test-" + Guid.NewGuid().ToString("N") + ".log");
+        using (var provider = new FileLoggerProvider(Options(logFile), AcceptAll))
+        {
+            provider.CreateLogger("Test").LogInformation("first");
+            // The writer holds the file with FileShare.ReadWrite — a reader must be able
+            // to open and read it (this is what Get-Content -Wait does while diagnosing).
+            using var reader = new StreamReader(new FileStream(logFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite));
+            string content = reader.ReadToEnd();
+            Assert.Contains("first", content);
+        }
     }
 }
