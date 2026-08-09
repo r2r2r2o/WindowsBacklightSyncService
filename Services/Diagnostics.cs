@@ -42,7 +42,7 @@ public sealed class Diagnostics
         return 0;
     }
 
-    private void WriteSnapshot(bool consoleOut, bool writeTest)
+    internal void WriteSnapshot(bool consoleOut, bool writeTest)
     {
         void Out(string line)
         {
@@ -179,7 +179,10 @@ public sealed class Diagnostics
         Out("=== end of snapshot ===");
     }
 
-    private async Task ListenForEventsAsync()
+    private async Task ListenForEventsAsync() => await ListenForEventsAsync(TimeSpan.FromSeconds(10));
+
+    /// <summary>Listens for WMI brightness events for the given duration (internal: testable window).</summary>
+    internal async Task ListenForEventsAsync(TimeSpan duration)
     {
         void Out(string line)
         {
@@ -187,7 +190,7 @@ public sealed class Diagnostics
             _logger.LogInformation("{Line}", line);
         }
 
-        Out("=== Listening for WMI brightness events for 10 seconds ===");
+        Out("=== Listening for WMI brightness events ===");
         Out("Press a brightness key or move the brightness slider NOW...");
         Out("");
 
@@ -203,7 +206,7 @@ public sealed class Diagnostics
         };
         watcher.Start();
 
-        DateTime end = DateTime.UtcNow.AddSeconds(10);
+        DateTime end = DateTime.UtcNow.AddSeconds(duration.TotalSeconds);
         while (DateTime.UtcNow < end)
             await Task.Delay(250);
 

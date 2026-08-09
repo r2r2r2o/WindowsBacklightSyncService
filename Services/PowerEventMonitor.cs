@@ -25,6 +25,9 @@ public sealed class PowerEventMonitor : IDisposable
     /// <summary>True while the message-loop thread is intended to run (internal for tests).</summary>
     internal bool IsRunning => _running;
 
+    /// <summary>Handle of the hidden message window (internal for tests to send messages).</summary>
+    internal IntPtr WindowHandle => _hwnd;
+
     /// <summary>Raised when the system resumes from sleep/hibernate.</summary>
     public event Action? Resumed;
 

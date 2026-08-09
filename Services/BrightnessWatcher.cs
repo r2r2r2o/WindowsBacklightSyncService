@@ -381,17 +381,102 @@ public sealed class BrightnessWatcher : IDisposable
         return null;
     }
 
+    /// <summary>
+    /// Abstraction over a delivered WMI brightness event's data, so the extraction logic
+    /// (TryExtractBrightness etc.) is unit-testable without a live WMI connection.
+    /// </summary>
+    internal interface IBrightnessEventData
+    {
+        int? GetIntProperty(string name);
+        bool? GetBoolProperty(string name);
+        string? GetMofText();
+        string? ClassName { get; }
+        IEnumerable<string> PropertyNames { get; }
+    }
+
+    /// <summary>Adapter over a real WMI event object (ManagementBaseObject).</summary>
+    private sealed class WmiEventData : IBrightnessEventData
+    {
+        private readonly ManagementBaseObject _event;
+
+        public WmiEventData(ManagementBaseObject e) => _event = e;
+
+        public int? GetIntProperty(string name)
+        {
+            try
+            {
+                object? raw = _event.Properties[name]?.Value;
+                if (raw is null || raw is DBNull)
+                    return null;
+                return Convert.ToInt32(raw);
+            }
+            catch
+            {
+                return null; // property missing or unreadable — try the next candidate
+            }
+        }
+
+        public bool? GetBoolProperty(string name)
+        {
+            try
+            {
+                return _event.Properties[name]?.Value is bool value ? value : null;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        public string? GetMofText()
+        {
+            try
+            {
+                return _event.GetText(TextFormat.Mof);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        public string? ClassName
+        {
+            get
+            {
+                try { return _event.ClassPath.ClassName; }
+                catch { return null; }
+            }
+        }
+
+        public IEnumerable<string> PropertyNames
+        {
+            get
+            {
+                var names = new List<string>();
+                foreach (PropertyData property in _event.Properties)
+                {
+                    try { names.Add(property.Name); }
+                    catch { names.Add("<unreadable>"); }
+                }
+                return names;
+            }
+        }
+    }
+
     private void OnBrightnessEventArrived(object sender, EventArrivedEventArgs e)
     {
         long count = Interlocked.Increment(ref _eventsReceived);
         try
         {
+            var data = new WmiEventData(e.NewEvent);
+
             // First few events: log the delivered event schema, so driver-specific
             // property layouts (e.g. Intel HD 3000) are visible in the log.
             if (count <= 5)
-                LogEventSchema(e);
+                LogEventSchema(data);
 
-            int? brightness = TryExtractBrightness(e, out bool adaptive);
+            int? brightness = TryExtractBrightness(data, out bool adaptive);
             if (brightness is null)
             {
                 // Driver-specific schema: the event is still a reliable "brightness
@@ -421,7 +506,7 @@ public sealed class BrightnessWatcher : IDisposable
     /// driver-specific property names. Tries known candidates, then parses the event's
     /// MOF text, and returns null only if nothing worked.
     /// </summary>
-    private static int? TryExtractBrightness(EventArrivedEventArgs e, out bool adaptive)
+    internal static int? TryExtractBrightness(IBrightnessEventData e, out bool adaptive)
     {
         adaptive = false;
 
@@ -445,14 +530,11 @@ public sealed class BrightnessWatcher : IDisposable
         return null;
     }
 
-    private static int? TryGetEventPropertyInt(EventArrivedEventArgs e, string name)
+    internal static int? TryGetEventPropertyInt(IBrightnessEventData e, string name)
     {
         try
         {
-            object? raw = e.NewEvent.Properties[name]?.Value;
-            if (raw is null || raw is DBNull)
-                return null;
-            return Convert.ToInt32(raw);
+            return e.GetIntProperty(name);
         }
         catch
         {
@@ -460,11 +542,11 @@ public sealed class BrightnessWatcher : IDisposable
         }
     }
 
-    private static bool? TryGetEventPropertyBool(EventArrivedEventArgs e, string name)
+    internal static bool? TryGetEventPropertyBool(IBrightnessEventData e, string name)
     {
         try
         {
-            return e.NewEvent.Properties[name]?.Value is bool value ? value : null;
+            return e.GetBoolProperty(name);
         }
         catch
         {
@@ -472,11 +554,11 @@ public sealed class BrightnessWatcher : IDisposable
         }
     }
 
-    private static int? ParseBrightnessFromMof(EventArrivedEventArgs e)
+    internal static int? ParseBrightnessFromMof(IBrightnessEventData e)
     {
         try
         {
-            return ParseBrightnessFromMofText(e.NewEvent.GetText(TextFormat.Mof));
+            return ParseBrightnessFromMofText(e.GetMofText() ?? string.Empty);
         }
         catch
         {
@@ -499,17 +581,12 @@ public sealed class BrightnessWatcher : IDisposable
         return value is >= 0 and <= 100 ? value : null;
     }
 
-    private void LogEventSchema(EventArrivedEventArgs e)
+    internal void LogEventSchema(IBrightnessEventData e)
     {
         try
         {
-            string className = e.NewEvent.ClassPath.ClassName;
-            var names = new List<string>();
-            foreach (PropertyData property in e.NewEvent.Properties)
-            {
-                try { names.Add(property.Name); }
-                catch { names.Add("<unreadable>"); }
-            }
+            string className = e.ClassName ?? "?";
+            var names = new List<string>(e.PropertyNames);
             _logger.LogDebug("WMI event schema: class={Class}, properties=[{Names}].", className, string.Join(", ", names));
         }
         catch (Exception ex)
@@ -518,7 +595,7 @@ public sealed class BrightnessWatcher : IDisposable
         }
     }
 
-    private void RaiseChanged(int brightness, bool adaptive)
+    internal void RaiseChanged(int brightness, bool adaptive)
     {
         _logger.LogDebug("Brightness signal: {Brightness}% (adaptive: {Adaptive}).", brightness, adaptive);
         BrightnessChanged?.Invoke(brightness, adaptive);

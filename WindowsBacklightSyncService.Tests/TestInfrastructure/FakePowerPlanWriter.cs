@@ -19,6 +19,9 @@ public sealed class FakePowerPlanWriter : IPowerPlanBrightnessWriter
     public bool ThrowOnWrite { get; set; }
     public bool ThrowOnEnumerate { get; set; }
 
+    /// <summary>Optional interceptor to make writes behave differently (e.g. no-op) in tests.</summary>
+    public Action<Guid, int, bool>? WriteInterceptor { get; set; }
+
     public void AddPlan(Guid guid, int? ac, int? dc, string? name = null)
     {
         Schemes.Add(guid);
@@ -41,6 +44,9 @@ public sealed class FakePowerPlanWriter : IPowerPlanBrightnessWriter
         Writes.Add((schemeGuid, brightnessPercent, ac));
         var (existingAc, existingDc) = Stored.TryGetValue(schemeGuid, out var s) ? s : ((int?)null, (int?)null);
         Stored[schemeGuid] = (ac ? brightnessPercent : existingAc, ac ? existingDc : brightnessPercent);
+        // The interceptor runs AFTER the state update; it can override the write, which
+        // is how tests simulate a driver that ignores the write (read-back mismatch).
+        WriteInterceptor?.Invoke(schemeGuid, brightnessPercent, ac);
     }
 
     public int? ReadBrightnessValue(Guid schemeGuid, bool ac)
