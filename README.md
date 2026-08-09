@@ -140,3 +140,7 @@ BacklightSyncService/
 ```powershell
 .\scripts\uninstall.ps1   # elevated
 ```
+
+## Continuous integration (GitHub Actions)
+
+A ready-made workflow lives at `.github/workflows/dotnet-desktop.yml`. It runs on `windows-latest`, restores/builds/publishes the service (`dotnet publish -c Release -r win-x64 --self-contained true -o publish`), smoke-tests the binary with `--check`, and uploads the `publish` folder as the `BacklightSyncService-win-x64` artifact. The artifact can be downloaded from the workflow run and installed with `scripts/install.ps1` (or copied straight into `C:\Program Files\BacklightSyncService`).
