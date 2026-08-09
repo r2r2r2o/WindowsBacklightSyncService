@@ -150,18 +150,32 @@ Two ready-made workflows live in `.github/workflows/`:
 
 ## Making a release
 
-Releases are tag-driven and fully automated:
+Releases are **fully automatic** — two ways to trigger, pick whichever you prefer:
 
+**A) Bump-and-push (no tags):**
 ```powershell
-# 1. Make sure the csproj version is the one you want to ship
-#    (e.g. <Version>1.4.1</Version> in BacklightSyncService.csproj)
-
-# 2. Commit and push your changes, then tag and push the tag
-git tag v1.4.1
-git push origin v1.4.1
+# 1. Bump the version in BacklightSyncService.csproj
+#    (e.g. <Version>1.4.1</Version> — the next release's version)
+# 2. Commit and push to main
+git add BacklightSyncService.csproj
+git commit -m "Bump version to 1.4.1"
+git push origin main
 ```
+The workflow creates a release **only if the csproj version is newer than the latest existing release** (unchanged version → run completes, skips, logs "skipping release creation").
 
-The `Release` workflow then: builds **two** win-x64 variants → runs the `--check` smoke test on both → bundles each with `scripts\install.ps1`, `README.md` and `LICENSE.txt` → computes SHA-256 checksums → creates a GitHub Release **v1.4.1** with auto-generated notes and both zips (+ checksums) attached.
+**B) Tag (classic, always releases):**
+```powershell
+git tag v1.4.1 && git push origin v1.4.1
+```
+A tag push always creates the release for that version (and validates it matches the csproj version). Both `v1.4.1` and bare `1.4.1` tags are accepted.
+
+> ⚠️ If a release was created but shows **only source code archives** (no zips/checksums), the Release workflow didn't run for it — usually because the tag didn't match the trigger (e.g. a bare `1.4.0` tag on an older workflow, or a release created manually from the UI). Fix: delete that release **and its tag**, then re-trigger properly:
+> ```powershell
+> gh release delete 1.4.0 --yes --cleanup-tag
+> git push origin v1.4.0     # after pushing the fixed workflow
+> ```
+
+Either way the `Release` workflow builds **both** win-x64 variants, smoke-tests them with `--check`, and creates a GitHub Release with auto-generated notes, both zips and their SHA-256 checksums attached. A manual run from the Actions tab uses the csproj version (same skip logic as A).
 
 ### Which zip should I download?
 

@@ -7,8 +7,13 @@
 #        - framework-dependent: requires the .NET 10 Runtime installed on the target
 #        - much smaller (a few hundred KB)
 #
-# Trigger: push a version tag, e.g.  git tag v1.4.0 && git push origin v1.4.0
-# (or run manually from the Actions tab — the version is then read from the csproj).
+# FULLY AUTOMATIC — two ways to trigger:
+#   A) Push to main: a release is created only when the <Version> in
+#      BacklightSyncService.csproj is NEWER than the version of the latest
+#      existing release. No tags to push — just bump the version and commit.
+#   B) Push a version tag (git tag v1.4.0 && git push origin v1.4.0):
+#      always creates/refreshes a release for that exact version.
+#   C) Run manually from the Actions tab (uses the csproj version).
 #
 # Both zips contain the binaries in a "publish" folder together with
 # scripts\install.ps1, so installing a release is:
@@ -18,7 +23,9 @@ name: Release
 
 on:
   push:
-    tags: [ 'v*' ]
+    branches: [ "main" ]
+    # Match BOTH v-prefixed tags (v1.4.0) and bare version tags (1.4.0).
+    tags: [ 'v*', '[0-9]*' ]
   workflow_dispatch:
 
 permissions:
@@ -64,23 +71,56 @@ jobs:
             if (Test-Path LICENSE.txt) { Copy-Item -Path LICENSE.txt -Destination "$dir\LICENSE.txt" -Force }
           }
 
+      # Decide whether to create a release and which version to use.
+      #   tag trigger   -> version = tag (with or without the "v" prefix), always release;
+      #                    validates against the csproj version
+      #   branch/manual -> version = csproj, release only if newer than the latest release
+      # Emits lowercase "true"/"false" so the `if:` condition matches reliably.
       - name: Determine version
         id: version
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
+          function Get-Version([string]$tag) {
+            if ($tag -match '^v?(\d+)\.(\d+)\.(\d+)') {
+              return [version]"$($matches[1]).$($matches[2]).$($matches[3])"
+            }
+            return $null
+          }
+
+          $shouldRelease = $false
           $csprojVersion = [regex]::Match((Get-Content BacklightSyncService.csproj -Raw), '<Version>([^<]+)</Version>').Groups[1].Value
+
           if ($env:GITHUB_REF_TYPE -eq 'tag') {
-            $version = $env:GITHUB_REF_NAME.TrimStart('v')
+            $version = $env:GITHUB_REF_NAME.TrimStart('v')   # handles both v1.4.0 and 1.4.0
             if ($csprojVersion -and $version -ne $csprojVersion) {
               throw "Tag '$env:GITHUB_REF_NAME' does not match <Version>$csprojVersion</Version> in BacklightSyncService.csproj — bump the version and re-tag."
             }
+            $shouldRelease = $true
+            Write-Host "Tagged run: releasing v$version (explicit tag)."
           } else {
-            $version = if ($csprojVersion) { $csprojVersion } else { 'manual' }
+            if (-not $csprojVersion) { throw "No <Version> found in BacklightSyncService.csproj." }
+            $csprojVer = [version]$csprojVersion
+
+            $existingTags = @(gh release list --limit 100 --json tagName --jq '.[].tagName' 2>$null)
+            $latestVer = $existingTags | ForEach-Object { Get-Version $_ } | Where-Object { $_ } | Sort-Object | Select-Object -Last 1
+
+            if ($latestVer -and $csprojVer -le $latestVer) {
+              $shouldRelease = $false
+              Write-Host "Version v$csprojVersion is not newer than the latest release v$latestVer — skipping release creation."
+            } else {
+              $shouldRelease = $true
+              Write-Host "Version v$csprojVersion will be released (latest existing: $(if ($latestVer) { 'v' + $latestVer } else { 'none' }))."
+            }
+            $version = $csprojVersion
           }
-          Write-Host "Release version: v$version"
+
           "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "should_release=$($shouldRelease.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
       - name: Create zips + checksums
+        if: steps.version.outputs.should_release == 'true'
         shell: pwsh
         env:
           VERSION: ${{ steps.version.outputs.version }}
@@ -99,6 +139,7 @@ jobs:
           }
 
       - name: Create GitHub Release
+        if: steps.version.outputs.should_release == 'true'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -119,5 +160,14 @@ jobs:
             $assets += "$zip.sha256"
           }
           gh release create "v$env:VERSION" @assets `
+            --target ${{ github.sha }} `
             --title "BacklightSyncService v$env:VERSION" `
             --generate-notes
+
+      - name: Show result
+        if: always()
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release list --limit 5
