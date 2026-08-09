@@ -143,4 +143,35 @@ BacklightSyncService/
 
 ## Continuous integration (GitHub Actions)
 
-A ready-made workflow lives at `.github/workflows/dotnet-desktop.yml`. It runs on `windows-latest`, restores/builds/publishes the service (`dotnet publish -c Release -r win-x64 --self-contained true -o publish`), smoke-tests the binary with `--check`, and uploads the `publish` folder as the `BacklightSyncService-win-x64` artifact. The artifact can be downloaded from the workflow run and installed with `scripts/install.ps1` (or copied straight into `C:\Program Files\BacklightSyncService`).
+Two ready-made workflows live in `.github/workflows/`:
+
+- **`dotnet-desktop.yml`** — CI on every push/PR to `main`: restores, builds, publishes (`dotnet publish -c Release -r win-x64 --self-contained true -o publish`), smoke-tests the binary with `--check`, and uploads the `publish` folder as the `BacklightSyncService-win-x64` artifact.
+- **`release.yml`** — publishes a **GitHub Release** with the compiled binaries whenever you push a version tag.
+
+## Making a release
+
+Releases are tag-driven and fully automated:
+
+```powershell
+# 1. Make sure the csproj version is the one you want to ship
+#    (e.g. <Version>1.4.1</Version> in BacklightSyncService.csproj)
+
+# 2. Commit and push your changes, then tag and push the tag
+git tag v1.4.1
+git push origin v1.4.1
+```
+
+The `Release` workflow then: builds the self-contained win-x64 binaries → runs the `--check` smoke test → bundles them into `BacklightSyncService-v1.4.1-win-x64.zip` (with `scripts\install.ps1`, `README.md` and `LICENSE.txt` next to the exe) → computes a SHA-256 checksum → creates a GitHub Release **v1.4.1** with auto-generated notes and both files attached.
+
+> The workflow verifies the tag matches `<Version>` in the csproj and aborts if they differ. If you want a release without pushing a tag, run the workflow manually from the Actions tab — the version is then read from the csproj.
+
+**Installing a release on the target machine:**
+
+```powershell
+# download BacklightSyncService-v1.4.1-win-x64.zip from the release page,
+# optionally verify the checksum, then in an elevated PowerShell:
+Expand-Archive BacklightSyncService-v1.4.1-win-x64.zip -DestinationPath .
+.\publish\scripts\install.ps1
+```
+
+(Verify with `Get-FileHash BacklightSyncService-v1.4.1-win-x64.zip -Algorithm SHA256` and compare against the `.sha256` file attached to the release.)

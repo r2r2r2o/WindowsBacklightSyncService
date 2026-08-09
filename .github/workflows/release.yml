@@ -1,0 +1,89 @@
+# Builds the service and publishes a GitHub Release with the compiled binaries.
+#
+# Trigger: push a version tag, e.g.  git tag v1.4.0 && git push origin v1.4.0
+# (or run manually from the Actions tab — the version is then read from the csproj).
+#
+# The release zip contains the self-contained win-x64 binaries in a "publish"
+# folder together with scripts\install.ps1, so installing a release is:
+#   download zip -> extract -> run publish\scripts\install.ps1 (elevated)
+
+name: Release
+
+on:
+  push:
+    tags: [ 'v*' ]
+  workflow_dispatch:
+
+permissions:
+  contents: write   # needed to create GitHub Releases
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Publish (self-contained win-x64)
+        run: dotnet publish BacklightSyncService.csproj -c Release -r win-x64 --self-contained true -o publish
+
+      - name: Smoke test (--check)
+        run: .\publish\BacklightSyncService.exe --check
+        shell: pwsh
+
+      # Make the release bundle self-contained: install script + docs next to the exe.
+      - name: Stage release bundle
+        shell: pwsh
+        run: |
+          Copy-Item -Path scripts -Destination publish\scripts -Recurse -Force
+          Copy-Item -Path README.md -Destination publish\README.md -Force
+          if (Test-Path LICENSE.txt) { Copy-Item -Path LICENSE.txt -Destination publish\LICENSE.txt -Force }
+
+      - name: Determine version
+        id: version
+        shell: pwsh
+        run: |
+          $csprojVersion = [regex]::Match((Get-Content BacklightSyncService.csproj -Raw), '<Version>([^<]+)</Version>').Groups[1].Value
+          if ($env:GITHUB_REF_TYPE -eq 'tag') {
+            $version = $env:GITHUB_REF_NAME.TrimStart('v')
+            if ($csprojVersion -and $version -ne $csprojVersion) {
+              throw "Tag '$env:GITHUB_REF_NAME' does not match <Version>$csprojVersion</Version> in BacklightSyncService.csproj — bump the version and re-tag."
+            }
+          } else {
+            $version = if ($csprojVersion) { $csprojVersion } else { 'manual' }
+          }
+          Write-Host "Release version: v$version"
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Create zip
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          $zip = "BacklightSyncService-v$env:VERSION-win-x64.zip"
+          Compress-Archive -Path publish -DestinationPath $zip -CompressionLevel Optimal
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash
+          "$hash  $zip" | Set-Content -Path "$zip.sha256"
+          Write-Host "Created $zip"
+
+      - name: Create GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          $zip = "BacklightSyncService-v$env:VERSION-win-x64.zip"
+          gh release view "v$env:VERSION" 2>$null | Out-Null
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "Release v$env:VERSION already exists — deleting and recreating."
+            gh release delete "v$env:VERSION" --yes --cleanup-tag
+          }
+          gh release create "v$env:VERSION" $zip "$zip.sha256" `
+            --title "BacklightSyncService v$env:VERSION" `
+            --generate-notes
