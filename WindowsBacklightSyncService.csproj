@@ -9,7 +9,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>WindowsBacklightSyncService</RootNamespace>
     <AssemblyName>WindowsBacklightSyncService</AssemblyName>
-    <Version>1.7.0</Version>
+    <Version>1.8.0</Version>
     <!-- Allows building (compile check) on non-Windows machines; ignored on Windows. -->
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
   </PropertyGroup>
@@ -17,6 +17,18 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.10" />
     <PackageReference Include="System.Management" Version="10.0.10" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Expose internals to the unit test project. -->
+    <InternalsVisibleTo Include="WindowsBacklightSyncService.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The test project lives under this folder; keep it out of the main project. -->
+    <Compile Remove="WindowsBacklightSyncService.Tests\**" />
+    <EmbeddedResource Remove="WindowsBacklightSyncService.Tests\**" />
+    <None Remove="WindowsBacklightSyncService.Tests\**" />
   </ItemGroup>
 
 </Project>

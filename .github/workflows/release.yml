@@ -60,6 +60,9 @@ jobs:
         run: .\publish-fd\WindowsBacklightSyncService.exe --check
         shell: pwsh
 
+      - name: Run unit tests
+        run: dotnet test WindowsBacklightSyncService.Tests\WindowsBacklightSyncService.Tests.csproj -c Release
+
       # Make both bundles self-contained in the install-script sense: put
       # scripts + docs next to each exe.
       - name: Stage release bundles

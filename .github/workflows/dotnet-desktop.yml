@@ -43,6 +43,9 @@ jobs:
         run: .\publish\WindowsBacklightSyncService.exe --check
         shell: pwsh
 
+      - name: Run unit tests
+        run: dotnet test WindowsBacklightSyncService.Tests\WindowsBacklightSyncService.Tests.csproj -c Release
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
         with:

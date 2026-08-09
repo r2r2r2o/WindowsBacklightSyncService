@@ -247,34 +247,24 @@ public sealed class BacklightSyncWorker : BackgroundService
         }
     }
 
-    private void OnBrightnessChanged(int brightness, bool adaptive)
+    internal void OnBrightnessChanged(int brightness, bool adaptive)
     {
         var opts = _options.CurrentValue;
         long count = Interlocked.Increment(ref _eventCount);
         _logger.LogDebug("Brightness change #{Count}: {Brightness}% (adaptive={Adaptive}).", count, brightness, adaptive);
 
-        if (adaptive && opts.IgnoreAdaptiveChanges)
+        if (BrightnessChangeClassifier.ShouldIgnoreAdaptive(adaptive, opts.IgnoreAdaptiveChanges))
         {
             _logger.LogDebug("Ignoring adaptive brightness change ({Brightness}%) — IgnoreAdaptiveChanges=true.", brightness);
             return;
         }
 
-        if (IsInSuppressionWindow(opts))
+        if (BrightnessChangeClassifier.IsLoopEcho(brightness, IsInSuppressionWindow(opts), _lastAppliedBrightness))
         {
-            // Loop protection: re-applying the active scheme can emit a brightness event with
-            // the value we just applied. Only such SAME-VALUE events are suppressed — a real
-            // user change (different value) inside the window must still pass through.
-            int lastApplied = _lastAppliedBrightness;
-            if (brightness == lastApplied)
-            {
-                _logger.LogDebug(
-                    "Ignoring change ({Brightness}%) inside the post-apply suppression window — same as last applied ({Last}%); loop protection.",
-                    brightness, lastApplied);
-                return;
-            }
             _logger.LogDebug(
-                "Change ({Brightness}%) inside the suppression window differs from last applied ({Last}%) — processing it anyway.",
-                brightness, lastApplied);
+                "Ignoring change ({Brightness}%) inside the post-apply suppression window — same as last applied ({Last}%); loop protection.",
+                brightness, _lastAppliedBrightness);
+            return;
         }
 
         lock (_gate)
@@ -333,42 +323,39 @@ public sealed class BacklightSyncWorker : BackgroundService
 
     /// <summary>
     /// True when the incoming brightness level is likely system-initiated — the screen
-    /// dimming after inactivity, its restore, or battery-saver dimming. Discriminator:
-    /// Windows records deliberate user changes (brightness keys, slider) in the ACTIVE
-    /// plan's stored brightness, but system dimming changes only the screen level.
-    /// Therefore a level that matches the active plan's stored AC or DC value is treated
-    /// as user-initiated; anything else as system-initiated. Fails open: if the plan
-    /// cannot be read, the change is treated as user-initiated.
+    /// dimming after inactivity, its restore, or battery-saver dimming. Reads the active
+    /// plan's stored AC/DC values and delegates to the pure
+    /// <see cref="BrightnessChangeClassifier.IsSystemDimming"/> decision. Fails open:
+    /// if the plan cannot be read, the change is treated as user-initiated.
     /// </summary>
     private bool IsSystemInitiatedChange(int brightnessPercent)
     {
         if (!_options.CurrentValue.IgnoreSystemDimming)
             return false;
 
+        int? acStored = null, dcStored = null;
         try
         {
             Guid? active = _writer.GetActiveScheme();
             if (active is null)
                 return false;
-
-            int? acStored = _writer.ReadBrightnessValue(active.Value, ac: true);
-            int? dcStored = _writer.ReadBrightnessValue(active.Value, ac: false);
-            if (acStored is null && dcStored is null)
-                return false;
-
-            if (acStored == brightnessPercent || dcStored == brightnessPercent)
-                return false;
-
-            _logger.LogDebug(
-                "Brightness {Brightness}% does not match the active plan's stored level (AC={Ac}, DC={Dc}) — system-initiated (inactivity dim / battery saver).",
-                brightnessPercent, acStored?.ToString() ?? "?", dcStored?.ToString() ?? "?");
-            return true;
+            acStored = _writer.ReadBrightnessValue(active.Value, ac: true);
+            dcStored = _writer.ReadBrightnessValue(active.Value, ac: false);
         }
         catch (Exception ex)
         {
             _logger.LogDebug(ex, "Could not evaluate the system-dimming filter — processing the change anyway.");
             return false;
         }
+
+        bool isDimming = BrightnessChangeClassifier.IsSystemDimming(brightnessPercent, ignoreSystemDimming: true, acStored, dcStored);
+        if (isDimming)
+        {
+            _logger.LogDebug(
+                "Brightness {Brightness}% does not match the active plan's stored level (AC={Ac}, DC={Dc}) — system-initiated (inactivity dim / battery saver).",
+                brightnessPercent, acStored?.ToString() ?? "?", dcStored?.ToString() ?? "?");
+        }
+        return isDimming;
     }
 
     /// <summary>
@@ -398,7 +385,7 @@ public sealed class BacklightSyncWorker : BackgroundService
         }
     }
 
-    private void ApplyBrightness(int brightnessPercent, bool force)
+    internal void ApplyBrightness(int brightnessPercent, bool force)
     {
         var opts = _options.CurrentValue;
         brightnessPercent = Math.Clamp(brightnessPercent, 0, 100);
@@ -459,14 +446,14 @@ public sealed class BacklightSyncWorker : BackgroundService
                     {
                         try { acStored = _writer.ReadBrightnessValue(scheme, ac: true); }
                         catch (Exception ex) { _logger.LogDebug(ex, "AC read failed for {Name} ({Guid}).", name, scheme); }
-                        writeAc = !opts.WriteOnlyWhenChanged || acStored is null || acStored.Value != brightnessPercent;
+                        writeAc = PlanWriteDecider.ShouldWrite(brightnessPercent, acStored, syncEnabled: true, opts.WriteOnlyWhenChanged);
                     }
 
                     if (opts.SyncDcValue)
                     {
                         try { dcStored = _writer.ReadBrightnessValue(scheme, ac: false); }
                         catch (Exception ex) { _logger.LogDebug(ex, "DC read failed for {Name} ({Guid}).", name, scheme); }
-                        writeDc = !opts.WriteOnlyWhenChanged || dcStored is null || dcStored.Value != brightnessPercent;
+                        writeDc = PlanWriteDecider.ShouldWrite(brightnessPercent, dcStored, syncEnabled: true, opts.WriteOnlyWhenChanged);
                     }
 
                     if (writeAc)

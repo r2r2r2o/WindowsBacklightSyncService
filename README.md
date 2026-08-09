@@ -121,6 +121,16 @@ Turn it back off the same way when you're done. The **Event Log** (Event Viewer 
 - Multi-monitor setups: it uses the first brightness-capable display (usually the built-in panel).
 - ThinkPad T520 notes: with Optimus, brightness control goes through the **Intel HD 3000** path (the NVIDIA GPU doesn't participate). The stock Windows 10 Intel driver may not fire WMI events for every change — that's exactly why the polling safety net exists.
 
+## Testing
+
+Unit tests live in `WindowsBacklightSyncService.Tests` (xUnit). They cover the decision logic (system-dimming filter, loop protection, adaptive ignore, per-plan write decisions), the worker's sync behavior against an in-memory plan writer (no hardware or WMI needed), and the file logger (writes, rotation, fallback). Run them with:
+
+```powershell
+dotnet test WindowsBacklightSyncService.Tests\WindowsBacklightSyncService.Tests.csproj -c Release
+```
+
+Both GitHub Actions workflows run the tests on every build; a release is not produced unless they pass.
+
 ## What's inside
 
 ```
