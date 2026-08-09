@@ -22,6 +22,9 @@ public sealed class PowerEventMonitor : IDisposable
     private volatile bool _running;
     private long _lastResumeTick;
 
+    /// <summary>True while the message-loop thread is intended to run (internal for tests).</summary>
+    internal bool IsRunning => _running;
+
     /// <summary>Raised when the system resumes from sleep/hibernate.</summary>
     public event Action? Resumed;
 

@@ -125,6 +125,8 @@ Turn it back off the same way when you're done. The **Event Log** (Event Viewer 
 
 Unit tests live in `WindowsBacklightSyncService.Tests` (xUnit, no hardware or WMI needed — everything runs against in-memory fakes). Coverage includes: the decision logic (system-dimming filter, loop protection, adaptive ignore, per-plan write decisions), the worker's sync behavior (debounce collapse, force, clamping, per-index AC/DC writes, failure handling, re-apply rules), configuration binding (code defaults vs. `appsettings.json`), the file logger (writes, rotation, pruning, fallback, filtering, exception details, concurrent read), the log-filter category chain, the WMI MOF parser, and the `--check` snapshot.
 
+A second tier of tests (`WindowsOnly\`) exercises the **real Windows API surface** — power-plan enumeration/reads, WMI/registry brightness queries, and the power-event monitor lifecycle. They are marked with `[WindowsFact]` and are **skipped automatically on Linux/macOS** ("Skipped" in the xUnit summary), so the suite stays green everywhere, while on Windows — including the `windows-latest` CI runners — they run for real. These tests are **read-only**: they never write to power plans or subscribe to events, so running them on your machine cannot change anything.
+
 ```powershell
 # run the tests
 dotnet test WindowsBacklightSyncService.Tests\WindowsBacklightSyncService.Tests.csproj -c Release
