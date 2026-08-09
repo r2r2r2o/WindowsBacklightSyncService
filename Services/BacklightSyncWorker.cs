@@ -277,8 +277,14 @@ public sealed class BacklightSyncWorker : BackgroundService
 
         lock (_gate)
         {
-            // Debounce: a rapid series of changes (e.g. slider drag) collapses into one sync.
-            _debounceCts?.Cancel();
+            // Debounce: cancel and dispose any previous token source, then schedule a new one.
+            var previous = _debounceCts;
+            if (previous is not null)
+            {
+                try { previous.Cancel(); } catch { }
+                try { previous.Dispose(); } catch { }
+            }
+
             var cts = new CancellationTokenSource();
             _debounceCts = cts;
             _logger.LogTrace("Debounce scheduled: {Brightness}% in {Delay}ms.", brightness, opts.DebounceMilliseconds);
@@ -300,6 +306,16 @@ public sealed class BacklightSyncWorker : BackgroundService
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Brightness synchronization failed: {Message}", ex.Message);
+                }
+                finally
+                {
+                    // Clear and dispose the CTS we created if it's still the active one.
+                    lock (_gate)
+                    {
+                        if (_debounceCts == cts)
+                            _debounceCts = null;
+                    }
+                    try { cts.Dispose(); } catch { }
                 }
             }, cts.Token);
         }
@@ -474,8 +490,13 @@ public sealed class BacklightSyncWorker : BackgroundService
         _logger.LogInformation("Stop requested — cancelling pending debounce.");
         lock (_gate)
         {
-            _debounceCts?.Cancel();
-            _debounceCts = null;
+            var cts = _debounceCts;
+            if (cts is not null)
+            {
+                try { cts.Cancel(); } catch { }
+                try { cts.Dispose(); } catch { }
+                _debounceCts = null;
+            }
         }
         await base.StopAsync(cancellationToken);
     }
