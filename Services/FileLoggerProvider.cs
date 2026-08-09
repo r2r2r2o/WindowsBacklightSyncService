@@ -1,7 +1,7 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
-namespace BacklightSyncService.Services;
+namespace WindowsBacklightSyncService.Services;
 
 /// <summary>Options for the file logger, read from the "Logging:File" configuration section.</summary>
 public sealed class FileLoggerOptions
@@ -15,7 +15,7 @@ public sealed class FileLoggerOptions
     public bool Enabled { get; set; } = false;
 
     /// <summary>Full path of the log file. Environment variables (%ProgramData% etc.) are expanded.</summary>
-    public string Path { get; set; } = @"%ProgramData%\BacklightSyncService\logs\backlight-sync.log";
+    public string Path { get; set; } = @"%ProgramData%\WindowsBacklightSyncService\logs\windows-backlight-sync.log";
 
     /// <summary>Maximum file size in bytes before rotation (default 5 MB).</summary>
     public long MaxSizeBytes { get; set; } = 5 * 1024 * 1024;
@@ -47,7 +47,7 @@ public sealed class FileLoggerOptions
 /// <remarks>
 /// The provider NEVER throws: if the configured log path cannot be opened (e.g. access denied
 /// because the file was created by the LocalSystem service and the current user runs the exe
-/// without elevation), it falls back to %LOCALAPPDATA%\BacklightSyncService\logs\backlight-sync.log.
+/// without elevation), it falls back to %LOCALAPPDATA%\WindowsBacklightSyncService\logs\windows-backlight-sync.log.
 /// If that fails too, file logging is silently disabled — the host keeps running either way.
 /// </remarks>
 public sealed class FileLoggerProvider : ILoggerProvider
@@ -79,7 +79,7 @@ public sealed class FileLoggerProvider : ILoggerProvider
         {
             string fallbackPath = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "BacklightSyncService", "logs", "backlight-sync.log");
+                "WindowsBacklightSyncService", "logs", "windows-backlight-sync.log");
             _writer = TryOpenWriter(fallbackPath);
             if (_writer is not null)
             {

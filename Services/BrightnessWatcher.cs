@@ -4,7 +4,7 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using Microsoft.Win32;
 
-namespace BacklightSyncService.Services;
+namespace WindowsBacklightSyncService.Services;
 
 /// <summary>
 /// Watches display backlight level changes.

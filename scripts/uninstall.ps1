@@ -1,11 +1,11 @@
 <#
 .SYNOPSIS
-    Stops and removes the BacklightSyncService Windows service.
+    Stops and removes the WindowsBacklightSyncService Windows service.
 .EXAMPLE
     .\uninstall.ps1
 #>
 param(
-    [string]$ServiceName = "BacklightSyncService"
+    [string]$ServiceName = "WindowsBacklightSyncService"
 )
 
 $ErrorActionPreference = "Stop"

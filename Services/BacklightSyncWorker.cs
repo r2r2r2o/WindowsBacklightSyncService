@@ -1,7 +1,7 @@
 using System.Security.Principal;
 using Microsoft.Extensions.Options;
 
-namespace BacklightSyncService.Services;
+namespace WindowsBacklightSyncService.Services;
 
 /// <summary>
 /// Core service logic: on every display backlight change (debounced), write the current level

@@ -1,10 +1,10 @@
-# BacklightSyncService
+# WindowsBacklightSyncService
 
 > **One screen brightness. Every power plan.**
 
 Windows remembers a separate display brightness inside **every** power plan. Switch from "Balanced" to "Power saver" and your screen jumps to whatever that plan had stored — usually not what you want.
 
-**BacklightSyncService fixes that.** It watches your brightness changes and writes the same level into *every* power plan (both the plugged-in and on-battery values). From then on, no matter which plan you activate, the brightness stays exactly where you left it.
+**WindowsBacklightSyncService fixes that.** It watches your brightness changes and writes the same level into *every* power plan (both the plugged-in and on-battery values). From then on, no matter which plan you activate, the brightness stays exactly where you left it.
 
 Built for a ThinkPad T520 (Intel HD 3000 + Optimus) on Windows 10, targeting .NET 10 (LTS).
 
@@ -65,7 +65,7 @@ All settings live in `appsettings.json` under the `BacklightSync` section (or as
 ### 1. Quick health check
 
 ```powershell
-& "C:\Program Files\BacklightSyncService\BacklightSyncService.exe" --check
+& "C:\Program Files\WindowsBacklightSyncService\WindowsBacklightSyncService.exe" --check
 ```
 
 Prints a snapshot: which brightness signals are available, the current brightness, the active plan, and every plan with its stored AC/DC values. Run it elevated for the most accurate picture.
@@ -77,7 +77,7 @@ The service is deliberately quiet — it writes **no log files** unless you ask.
 ```powershell
 # in an elevated PowerShell — enables file logging:
 $env:Logging__File__Enabled = "true"
-Restart-Service BacklightSyncService
+Restart-Service WindowsBacklightSyncService
 ```
 
 (or set `"Enabled": true` under `Logging:File` in `appsettings.json` instead).
@@ -85,7 +85,7 @@ Restart-Service BacklightSyncService
 Then watch what happens when you press the brightness keys:
 
 ```powershell
-Get-Content "$env:ProgramData\BacklightSyncService\logs\backlight-sync.log" -Wait -Tail 30
+Get-Content "$env:ProgramData\WindowsBacklightSyncService\logs\windows-backlight-sync.log" -Wait -Tail 30
 ```
 
 You'll see lines like:
@@ -95,14 +95,14 @@ DBG WMI brightness event #1: Brightness=70 (adaptive=False).
 INF Synchronized display brightness 70% across 5 power plan(s) (4 updated) — sync #2.
 ```
 
-Turn it back off the same way when you're done. The **Event Log** (Event Viewer → Windows Logs → Application, source `BacklightSyncService`) always keeps one summary line per sync, so you can check there without enabling file logging.
+Turn it back off the same way when you're done. The **Event Log** (Event Viewer → Windows Logs → Application, source `WindowsBacklightSyncService`) always keeps one summary line per sync, so you can check there without enabling file logging.
 
 ### 3. Common issues
 
 | Symptom | What's going on |
 |---|---|
 | `--check` says WMI classes "NOT available" | A driver quirk — the polling fallback still works. If brightness keys produce syncs in the log, everything is fine. |
-| Nothing syncs at all | Is the service running? (`Get-Service BacklightSyncService`) Check the Event Log for errors and run `--check`. |
+| Nothing syncs at all | Is the service running? (`Get-Service WindowsBacklightSyncService`) Check the Event Log for errors and run `--check`. |
 | `install.ps1` aborts with "STALE BUILD DETECTED" | You forgot to republish — run `dotnet publish ...` again, then reinstall. |
 | Brightness jumps when switching plans | The sync is debounced by half a second — give it a second after changing brightness before switching plans. |
 | Log file says "Access denied" | The file was created by the service (LocalSystem); run your console elevated, or let it fall back to `%LOCALAPPDATA%` automatically. |
@@ -118,7 +118,7 @@ Turn it back off the same way when you're done. The **Event Log** (Event Viewer 
 ## What's inside
 
 ```
-BacklightSyncService/
+WindowsBacklightSyncService/
 ├── Program.cs                       # entry point, DI, --check mode
 ├── appsettings.json                 # all configuration
 ├── BacklightSyncOptions.cs          # strongly-typed configuration
@@ -145,7 +145,7 @@ BacklightSyncService/
 
 Two ready-made workflows live in `.github/workflows/`:
 
-- **`dotnet-desktop.yml`** — CI on every push/PR to `main`: restores, builds, publishes (`dotnet publish -c Release -r win-x64 --self-contained true -o publish`), smoke-tests the binary with `--check`, and uploads the `publish` folder as the `BacklightSyncService-win-x64` artifact.
+- **`dotnet-desktop.yml`** — CI on every push/PR to `main`: restores, builds, publishes (`dotnet publish -c Release -r win-x64 --self-contained true -o publish`), smoke-tests the binary with `--check`, and uploads the `publish` folder as the `WindowsBacklightSyncService-win-x64` artifact.
 - **`release.yml`** — publishes a **GitHub Release** with the compiled binaries whenever you push a version tag.
 
 ## Making a release
@@ -154,10 +154,10 @@ Releases are **fully automatic** — two ways to trigger, pick whichever you pre
 
 **A) Bump-and-push (no tags):**
 ```powershell
-# 1. Bump the version in BacklightSyncService.csproj
+# 1. Bump the version in WindowsBacklightSyncService.csproj
 #    (e.g. <Version>1.4.1</Version> — the next release's version)
 # 2. Commit and push to main
-git add BacklightSyncService.csproj
+git add WindowsBacklightSyncService.csproj
 git commit -m "Bump version to 1.4.1"
 git push origin main
 ```
@@ -187,7 +187,7 @@ Either way the `Release` workflow builds **both** win-x64 variants, smoke-tests 
 Both install identically:
 
 ```powershell
-Expand-Archive BacklightSyncService-v1.4.1-win-x64-selfcontained.zip -DestinationPath .
+Expand-Archive WindowsBacklightSyncService-v1.4.1-win-x64-selfcontained.zip -DestinationPath .
 .\publish\scripts\install.ps1   # elevated
 ```
 

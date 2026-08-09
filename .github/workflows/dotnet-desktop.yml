@@ -1,11 +1,11 @@
-# Builds and publishes BacklightSyncService (a .NET 10 Windows service) and
+# Builds and publishes WindowsBacklightSyncService (a .NET 10 Windows service) and
 # uploads the self-contained win-x64 output as a build artifact.
 #
 # NOTE: replaces the stock "WPF/Windows Forms" template, which referenced a
 # placeholder solution name, MSBuild, MSIX packaging and signing — none of
 # which apply to this project.
 
-name: Build BacklightSyncService
+name: Build WindowsBacklightSyncService
 
 on:
   push:
@@ -34,18 +34,18 @@ jobs:
       # machine needs no .NET runtime installed. The publish folder is exactly
       # what scripts/install.ps1 expects.
       - name: Publish (self-contained, win-x64)
-        run: dotnet publish BacklightSyncService.csproj -c Release -r win-x64 --self-contained true -o publish
+        run: dotnet publish WindowsBacklightSyncService.csproj -c Release -r win-x64 --self-contained true -o publish
 
       # Smoke test: the diagnostic mode must run and exit 0 on the runner too.
       # (On CI hardware there is no backlight, so it reports signals as
       # unavailable and exits cleanly — which is the expected behavior.)
       - name: Smoke test (--check)
-        run: .\publish\BacklightSyncService.exe --check
+        run: .\publish\WindowsBacklightSyncService.exe --check
         shell: pwsh
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: BacklightSyncService-win-x64
+          name: WindowsBacklightSyncService-win-x64
           path: publish
           if-no-files-found: error

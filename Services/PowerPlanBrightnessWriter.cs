@@ -4,7 +4,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using Microsoft.Win32;
 
-namespace BacklightSyncService.Services;
+namespace WindowsBacklightSyncService.Services;
 
 /// <summary>
 /// Writes the display-brightness power setting ("Display brightness level",

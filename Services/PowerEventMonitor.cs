@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
 
-namespace BacklightSyncService.Services;
+namespace WindowsBacklightSyncService.Services;
 
 /// <summary>
 /// Listens for system power events (sleep / resume / hibernate) without any UI.

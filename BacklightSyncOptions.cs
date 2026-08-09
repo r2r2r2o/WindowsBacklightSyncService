@@ -1,4 +1,4 @@
-namespace BacklightSyncService;
+namespace WindowsBacklightSyncService;
 
 /// <summary>
 /// Configuration for the backlight synchronization service.

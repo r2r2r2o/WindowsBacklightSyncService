@@ -7,9 +7,9 @@
     <RollForward>LatestMajor</RollForward>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <RootNamespace>BacklightSyncService</RootNamespace>
-    <AssemblyName>BacklightSyncService</AssemblyName>
-    <Version>1.4.0</Version>
+    <RootNamespace>WindowsBacklightSyncService</RootNamespace>
+    <AssemblyName>WindowsBacklightSyncService</AssemblyName>
+    <Version>1.5.0</Version>
     <!-- Allows building (compile check) on non-Windows machines; ignored on Windows. -->
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
   </PropertyGroup>

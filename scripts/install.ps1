@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Installs or updates BacklightSyncService as a Windows service (runs as LocalSystem).
+    Installs or updates WindowsBacklightSyncService as a Windows service (runs as LocalSystem).
 .DESCRIPTION
     Copies the published binaries to $InstallDir and registers + starts the service.
 
@@ -14,9 +14,9 @@
     .\install.ps1
 #>
 param(
-    [string]$ServiceName = "BacklightSyncService",
-    [string]$InstallDir  = "$env:ProgramFiles\BacklightSyncService",
-    [string]$ExeName     = "BacklightSyncService.exe"
+    [string]$ServiceName = "WindowsBacklightSyncService",
+    [string]$InstallDir  = "$env:ProgramFiles\WindowsBacklightSyncService",
+    [string]$ExeName     = "WindowsBacklightSyncService.exe"
 )
 
 $ErrorActionPreference = "Stop"
@@ -36,7 +36,7 @@ if (-not (Test-Path $sourceExe)) {
 # Stale-build guard: the publish output must match the source version, otherwise the
 # update would silently install an old exe (seen repeatedly: publish\ still had v1.2.0
 # while the source was v1.3.x).
-$csprojPath = Join-Path $PSScriptRoot "..\BacklightSyncService.csproj"
+$csprojPath = Join-Path $PSScriptRoot "..\WindowsBacklightSyncService.csproj"
 $csprojVersion = (Select-String -Path $csprojPath -Pattern '<Version>([^<]+)</Version>' -ErrorAction SilentlyContinue | ForEach-Object { $_.Matches[0].Groups[1].Value })
 if ($csprojVersion) {
     $exeFileVersion = (Get-Item $sourceExe).VersionInfo.FileVersion
@@ -153,7 +153,7 @@ if ($existing) {
 } else {
     New-Service -Name $ServiceName `
         -BinaryPathName "`"$binPath`"" `
-        -DisplayName "Backlight Sync Service" `
+        -DisplayName "Windows Backlight Sync Service" `
         -Description "Synchronizes the display backlight level across all Windows power plans." `
         -StartupType Automatic | Out-Null
     Write-Host "Service '$ServiceName' created."
@@ -167,5 +167,5 @@ $svc.Refresh()
 if ($svc.Status -eq [System.ServiceProcess.ServiceControllerStatus]::Running) {
     Write-Host "Service '$ServiceName' started successfully. Binary: $binPath"
 } else {
-    Write-Warning "Service '$ServiceName' did not reach 'Running' (state: $($svc.Status)). Check the Event Log and $env:ProgramData\BacklightSyncService\logs\backlight-sync.log"
+    Write-Warning "Service '$ServiceName' did not reach 'Running' (state: $($svc.Status)). Check the Event Log and $env:ProgramData\WindowsBacklightSyncService\logs\windows-backlight-sync.log"
 }

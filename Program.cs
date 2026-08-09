@@ -1,14 +1,14 @@
-using BacklightSyncService;
-using BacklightSyncService.Services;
+using WindowsBacklightSyncService;
+using WindowsBacklightSyncService.Services;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using System.Reflection;
 
 // Version banner — printed on every console run so it is always verifiable which
-// build is deployed (e.g. "BacklightSyncService v1.2.0").
+// build is deployed (e.g. "WindowsBacklightSyncService v1.2.0").
 string appVersion = Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "?";
-Console.WriteLine($"BacklightSyncService v{appVersion} — synchronizes display backlight across all Windows power plans.");
+Console.WriteLine($"WindowsBacklightSyncService v{appVersion} — synchronizes display backlight across all Windows power plans.");
 
 try
 {
@@ -25,7 +25,7 @@ if (args.Contains("--check", StringComparer.OrdinalIgnoreCase))
 // The same executable also runs as a console app for debugging.
 builder.Services.AddWindowsService(options =>
 {
-    options.ServiceName = "BacklightSyncService";
+    options.ServiceName = "WindowsBacklightSyncService";
 });
 
 builder.Services.Configure<BacklightSyncOptions>(builder.Configuration.GetSection("BacklightSync"));
@@ -100,7 +100,7 @@ static Func<string, LogLevel, bool> BuildFileFilter(IConfiguration configuration
 
     return (category, level) =>
     {
-        // Walk the category namespace chain: "BacklightSyncService.Services.X" -> ... -> "Default".
+        // Walk the category namespace chain: "WindowsBacklightSyncService.Services.X" -> ... -> "Default".
         string current = category;
         while (!string.IsNullOrEmpty(current))
         {
@@ -117,13 +117,13 @@ static Func<string, LogLevel, bool> BuildFileFilter(IConfiguration configuration
 // + Event Log. Must never throw.
 static void ReportDiagnostic(string message)
 {
-    try { Console.Error.WriteLine($"BacklightSyncService: {message}"); }
+    try { Console.Error.WriteLine($"WindowsBacklightSyncService: {message}"); }
     catch { /* ignore */ }
 
     try
     {
         System.Diagnostics.EventLog.WriteEntry(
-            "BacklightSyncService", message, System.Diagnostics.EventLogEntryType.Warning);
+            "WindowsBacklightSyncService", message, System.Diagnostics.EventLogEntryType.Warning);
     }
     catch
     {

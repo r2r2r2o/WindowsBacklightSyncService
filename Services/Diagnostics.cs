@@ -5,7 +5,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
-namespace BacklightSyncService.Services;
+namespace WindowsBacklightSyncService.Services;
 
 /// <summary>
 /// One-shot diagnostics (console mode "--check"): reports what the service sees — WMI brightness
@@ -51,7 +51,7 @@ public sealed class Diagnostics
             _logger.LogInformation("{Line}", line);
         }
 
-        Out("=== BacklightSyncService diagnostic snapshot ===");
+        Out("=== WindowsBacklightSyncService diagnostic snapshot ===");
         Out($"Version   : {typeof(Diagnostics).Assembly.GetName().Version?.ToString(3) ?? "?"}");
         Out($"Time      : {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
         Out($"OS        : {Environment.OSVersion}");

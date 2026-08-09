@@ -1,15 +1,15 @@
 # Builds the service and publishes a GitHub Release with TWO zip bundles:
 #
-#   1. BacklightSyncService-v<ver>-win-x64-selfcontained.zip
+#   1. WindowsBacklightSyncService-v<ver>-win-x64-selfcontained.zip
 #        - self-contained: carries its own .NET runtime, runs on any Windows 10/11
 #        - larger (~70 MB)
-#   2. BacklightSyncService-v<ver>-win-x64-frameworkdependent.zip
+#   2. WindowsBacklightSyncService-v<ver>-win-x64-frameworkdependent.zip
 #        - framework-dependent: requires the .NET 10 Runtime installed on the target
 #        - much smaller (a few hundred KB)
 #
 # FULLY AUTOMATIC — two ways to trigger:
 #   A) Push to main: a release is created only when the <Version> in
-#      BacklightSyncService.csproj is NEWER than the version of the latest
+#      WindowsBacklightSyncService.csproj is NEWER than the version of the latest
 #      existing release. No tags to push — just bump the version and commit.
 #   B) Push a version tag (git tag v1.4.0 && git push origin v1.4.0):
 #      always creates/refreshes a release for that exact version.
@@ -46,18 +46,18 @@ jobs:
 
       # --- Self-contained build: no .NET runtime needed on the target machine ---
       - name: Publish (self-contained win-x64)
-        run: dotnet publish BacklightSyncService.csproj -c Release -r win-x64 --self-contained true -o publish
+        run: dotnet publish WindowsBacklightSyncService.csproj -c Release -r win-x64 --self-contained true -o publish
 
       # --- Framework-dependent build: needs .NET 10 Runtime on the target ---
       - name: Publish (framework-dependent win-x64)
-        run: dotnet publish BacklightSyncService.csproj -c Release -r win-x64 --self-contained false -o publish-fd
+        run: dotnet publish WindowsBacklightSyncService.csproj -c Release -r win-x64 --self-contained false -o publish-fd
 
       - name: Smoke test (self-contained --check)
-        run: .\publish\BacklightSyncService.exe --check
+        run: .\publish\WindowsBacklightSyncService.exe --check
         shell: pwsh
 
       - name: Smoke test (framework-dependent --check)
-        run: .\publish-fd\BacklightSyncService.exe --check
+        run: .\publish-fd\WindowsBacklightSyncService.exe --check
         shell: pwsh
 
       # Make both bundles self-contained in the install-script sense: put
@@ -90,17 +90,17 @@ jobs:
           }
 
           $shouldRelease = $false
-          $csprojVersion = [regex]::Match((Get-Content BacklightSyncService.csproj -Raw), '<Version>([^<]+)</Version>').Groups[1].Value
+          $csprojVersion = [regex]::Match((Get-Content WindowsBacklightSyncService.csproj -Raw), '<Version>([^<]+)</Version>').Groups[1].Value
 
           if ($env:GITHUB_REF_TYPE -eq 'tag') {
             $version = $env:GITHUB_REF_NAME.TrimStart('v')   # handles both v1.4.0 and 1.4.0
             if ($csprojVersion -and $version -ne $csprojVersion) {
-              throw "Tag '$env:GITHUB_REF_NAME' does not match <Version>$csprojVersion</Version> in BacklightSyncService.csproj — bump the version and re-tag."
+              throw "Tag '$env:GITHUB_REF_NAME' does not match <Version>$csprojVersion</Version> in WindowsBacklightSyncService.csproj — bump the version and re-tag."
             }
             $shouldRelease = $true
             Write-Host "Tagged run: releasing v$version (explicit tag)."
           } else {
-            if (-not $csprojVersion) { throw "No <Version> found in BacklightSyncService.csproj." }
+            if (-not $csprojVersion) { throw "No <Version> found in WindowsBacklightSyncService.csproj." }
             $csprojVer = [version]$csprojVersion
 
             $existingTags = @(gh release list --limit 100 --json tagName --jq '.[].tagName' 2>$null)
@@ -126,8 +126,8 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           $names = @(
-            "BacklightSyncService-v$env:VERSION-win-x64-selfcontained",
-            "BacklightSyncService-v$env:VERSION-win-x64-frameworkdependent"
+            "WindowsBacklightSyncService-v$env:VERSION-win-x64-selfcontained",
+            "WindowsBacklightSyncService-v$env:VERSION-win-x64-frameworkdependent"
           )
           $srcDirs = @('publish', 'publish-fd')
           for ($i = 0; $i -lt $names.Count; $i++) {
@@ -146,8 +146,8 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           $zips = @(
-            "BacklightSyncService-v$env:VERSION-win-x64-selfcontained.zip",
-            "BacklightSyncService-v$env:VERSION-win-x64-frameworkdependent.zip"
+            "WindowsBacklightSyncService-v$env:VERSION-win-x64-selfcontained.zip",
+            "WindowsBacklightSyncService-v$env:VERSION-win-x64-frameworkdependent.zip"
           )
           gh release view "v$env:VERSION" 2>$null | Out-Null
           if ($LASTEXITCODE -eq 0) {
@@ -161,7 +161,7 @@ jobs:
           }
           gh release create "v$env:VERSION" @assets `
             --target ${{ github.sha }} `
-            --title "BacklightSyncService v$env:VERSION" `
+            --title "WindowsBacklightSyncService v$env:VERSION" `
             --generate-notes
 
       - name: Show result
