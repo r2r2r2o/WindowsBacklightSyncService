@@ -65,15 +65,29 @@ public sealed class PowerPlanBrightnessWriter : IPowerPlanBrightnessWriter
             IntPtr buffer = Marshal.AllocHGlobal((int)bufferSize);
             try
             {
-                status = Native.PowerEnumerate(
-                    IntPtr.Zero, IntPtr.Zero, IntPtr.Zero,
-                    Native.PowerDataAccessor.AccessScheme, index, buffer, ref bufferSize);
-                if (status == Native.ErrorNoMoreItems)
-                    break;
-                if (status != Native.ErrorSuccess)
+                // The required buffer size can change between the size query and the fill
+                // (the scheme set is dynamic); retry a few times on ERROR_MORE_DATA.
+                for (int attempt = 0; ; attempt++)
+                {
+                    status = Native.PowerEnumerate(
+                        IntPtr.Zero, IntPtr.Zero, IntPtr.Zero,
+                        Native.PowerDataAccessor.AccessScheme, index, buffer, ref bufferSize);
+                    if (status == Native.ErrorSuccess)
+                    {
+                        schemes.Add(Marshal.PtrToStructure<Guid>(buffer));
+                        break;
+                    }
+                    if (status == Native.ErrorNoMoreItems)
+                        break;
+                    if (status == Native.ErrorMoreData && attempt < 2 && bufferSize > 0 && bufferSize <= (1 << 16))
+                    {
+                        // Retry with the (possibly larger) reported size.
+                        Marshal.FreeHGlobal(buffer);
+                        buffer = Marshal.AllocHGlobal((int)bufferSize);
+                        continue;
+                    }
                     throw new Win32Exception(unchecked((int)status));
-
-                schemes.Add(Marshal.PtrToStructure<Guid>(buffer));
+                }
             }
             finally
             {

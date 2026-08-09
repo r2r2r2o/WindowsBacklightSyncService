@@ -83,6 +83,13 @@ public sealed class PowerEventMonitor : IDisposable
         {
             _logger.LogDebug(ex, "Power event monitor loop ended unexpectedly.");
         }
+        finally
+        {
+            // Reset the running flag on EVERY exit path — otherwise a failed start or a
+            // crashed loop would permanently block Start() (the monitor could never be
+            // restarted, silently killing sleep/wake handling until the service restarts).
+            _running = false;
+        }
     }
 
     private IntPtr WndProc(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam)

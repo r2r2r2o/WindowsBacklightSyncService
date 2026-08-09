@@ -27,23 +27,40 @@ if (-not $isAdmin) {
     throw "Please run this script from an elevated PowerShell."
 }
 
-$source = Join-Path $PSScriptRoot "..\publish"
-$sourceExe = Join-Path $source $ExeName
-if (-not (Test-Path $sourceExe)) {
-    throw "Published binaries not found in '$source'. Build first:`n  dotnet publish -c Release -r win-x64 --self-contained true -o publish"
-}
-
-# Stale-build guard: the publish output must match the source version, otherwise the
-# update would silently install an old exe (seen repeatedly: publish\ still had v1.2.0
-# while the source was v1.3.x).
-$csprojPath = Join-Path $PSScriptRoot "..\WindowsBacklightSyncService.csproj"
-$csprojVersion = (Select-String -Path $csprojPath -Pattern '<Version>([^<]+)</Version>' -ErrorAction SilentlyContinue | ForEach-Object { $_.Matches[0].Groups[1].Value })
-if ($csprojVersion) {
-    $exeFileVersion = (Get-Item $sourceExe).VersionInfo.FileVersion
-    if ($exeFileVersion -and $exeFileVersion -notlike "$csprojVersion*") {
-        throw "STALE BUILD DETECTED: publish exe is v$exeFileVersion but the source is v$csprojVersion. Republish first:`n  dotnet publish -c Release -r win-x64 --self-contained true -o publish"
+# Locate the published binaries. Two layouts are supported:
+#   1. Repo checkout:     scripts\install.ps1  +  ..\publish\WindowsBacklightSyncService.exe
+#   2. Release bundle:    publish\scripts\install.ps1  +  ..\WindowsBacklightSyncService.exe
+$sourceCandidates = @(
+    (Join-Path $PSScriptRoot "..\publish"),
+    (Join-Path $PSScriptRoot "..")
+)
+$source = $null
+foreach ($candidate in $sourceCandidates) {
+    if (Test-Path (Join-Path $candidate $ExeName)) {
+        $source = $candidate
+        break
     }
-    Write-Host "Build version check: source v$csprojVersion == publish v$exeFileVersion (OK)."
+}
+if (-not $source) {
+    throw "Published binaries not found (looked in: $($sourceCandidates -join ', ')). Build first:`n  dotnet publish -c Release -r win-x64 --self-contained true -o publish"
+}
+$sourceExe = Join-Path $source $ExeName
+
+# Stale-build guard (only meaningful from a repo checkout, where the csproj is present):
+# the publish output must match the source version, otherwise the update would silently
+# install an old exe. Release bundles carry no csproj — the guard is skipped there.
+$csprojPath = Join-Path $PSScriptRoot "..\WindowsBacklightSyncService.csproj"
+if (Test-Path $csprojPath) {
+    $csprojVersion = (Select-String -Path $csprojPath -Pattern '<Version>([^<]+)</Version>' -ErrorAction SilentlyContinue | ForEach-Object { $_.Matches[0].Groups[1].Value })
+    if ($csprojVersion) {
+        $exeFileVersion = (Get-Item $sourceExe).VersionInfo.FileVersion
+        if ($exeFileVersion -and $exeFileVersion -notlike "$csprojVersion*") {
+            throw "STALE BUILD DETECTED: publish exe is v$exeFileVersion but the source is v$csprojVersion. Republish first:`n  dotnet publish -c Release -r win-x64 --self-contained true -o publish"
+        }
+        Write-Host "Build version check: source v$csprojVersion == publish v$exeFileVersion (OK)."
+    }
+} else {
+    Write-Host "No source csproj next to the script (release bundle) — skipping the stale-build guard."
 }
 
 New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null

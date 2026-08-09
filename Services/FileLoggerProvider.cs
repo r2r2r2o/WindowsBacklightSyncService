@@ -89,7 +89,10 @@ public sealed class FileLoggerProvider : ILoggerProvider
         }
 
         if (_writer is not null)
-            _currentSize = new FileInfo(ActivePath!).Length;
+        {
+            try { _currentSize = new FileInfo(ActivePath!).Length; }
+            catch { _currentSize = 0; } // a transient stat failure must never abort startup
+        }
     }
 
     public ILogger CreateLogger(string categoryName) => new FileLogger(this, categoryName, _filter);

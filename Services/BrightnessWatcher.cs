@@ -138,6 +138,14 @@ public sealed class BrightnessWatcher : IDisposable
     /// <summary>Subscribes to WMI events and starts the registry watch. Safe to call once per instance.</summary>
     public void Start()
     {
+        // Idempotency guard: calling Start() while already running would overwrite the WMI
+        // watcher without disposing it and duplicate registry handles/threads (a leak).
+        if (_watcher is not null || _registryRunning)
+        {
+            _logger.LogTrace("Start() called while already running — ignoring.");
+            return;
+        }
+
         // Log availability of every signal — the most common failure point (driver-dependent).
         bool hasBrightness = WmiClassExists("WmiMonitorBrightness");
         bool hasEvents = WmiClassExists("WmiMonitorBrightnessEvent");

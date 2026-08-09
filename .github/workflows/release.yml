@@ -68,7 +68,13 @@ jobs:
           foreach ($dir in @('publish', 'publish-fd')) {
             Copy-Item -Path scripts -Destination "$dir\scripts" -Recurse -Force
             Copy-Item -Path README.md -Destination "$dir\README.md" -Force
-            if (Test-Path LICENSE.txt) { Copy-Item -Path LICENSE.txt -Destination "$dir\LICENSE.txt" -Force }
+            # The repo ships the license as "LICENSE" (no extension) — try both spellings.
+            foreach ($license in @('LICENSE', 'LICENSE.txt')) {
+              if (Test-Path $license) {
+                Copy-Item -Path $license -Destination "$dir\LICENSE.txt" -Force
+                break
+              }
+            }
           }
 
       # Decide whether to create a release and which version to use.

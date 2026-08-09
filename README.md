@@ -24,6 +24,8 @@ That's it. The service installs itself, starts automatically at boot, and runs a
 
 **Updating later is the same command.** The script stops the service, waits until it has *really* stopped, replaces the binaries, and starts it again. It also double-checks that the build you're installing matches the source code version — if you forgot to republish, it stops and tells you instead of silently installing an old exe.
 
+The script works from **both** layouts: a repo checkout (`scripts\install.ps1` with a sibling `publish\`) and a downloaded release zip (`publish\scripts\install.ps1` with the exe in the same `publish` folder). In a release bundle the version guard is skipped (no csproj present) — the bundle is versioned by its filename.
+
 ## How it works
 
 1. **It listens.** Brightness changes are caught two ways:
