@@ -135,7 +135,7 @@ public sealed class BacklightSyncWorker : BackgroundService
     /// silently die during sleep) and re-sync: Windows may have changed the brightness while
     /// the machine was asleep (e.g. AC/DC transition), so push the current value everywhere.
     /// </summary>
-    private void OnSystemResumed()
+    internal void OnSystemResumed()
     {
         try
         {
@@ -165,7 +165,7 @@ public sealed class BacklightSyncWorker : BackgroundService
     /// Fallback change detection: WMI events are the primary signal, but if they are unavailable
     /// (or miss a change), polling WmiMonitorBrightness still catches it.
     /// </summary>
-    private void PollBrightness()
+    internal void PollBrightness()
     {
         try
         {
@@ -364,7 +364,7 @@ public sealed class BacklightSyncWorker : BackgroundService
     /// or "powercfg -duplicatescheme"). This detects plans added/removed while the service
     /// is running so custom plans are always included in the sync, and logs the change.
     /// </summary>
-    private void LogSchemeChanges(IReadOnlyList<Guid> schemes)
+    internal void LogSchemeChanges(IReadOnlyList<Guid> schemes)
     {
         var schemeSet = new HashSet<Guid>(schemes);
 

@@ -247,4 +247,80 @@ public class FileLoggerProviderTests
             Assert.Contains("first", content);
         }
     }
+
+    // ---------- FileLogger edge cases ----------
+
+    [Fact]
+    public void FileLogger_AppendsExceptionDetails()
+    {
+        string logFile = Path.Combine(Path.GetTempPath(), "bls-test-" + Guid.NewGuid().ToString("N") + ".log");
+        using (var provider = new FileLoggerProvider(Options(logFile), AcceptAll))
+        {
+            var logger = provider.CreateLogger("Test");
+            logger.Log(LogLevel.Information, 0, "state", new InvalidOperationException("boom"),
+                (state, ex) => $"msg {state} ex={ex?.Message}");
+        }
+
+        string content = File.ReadAllText(logFile);
+        Assert.Contains("msg state ex=boom", content);
+    }
+
+    [Fact]
+    public void FileLogger_IsEnabled_RespectsFilterAndNone()
+    {
+        string logFile = Path.Combine(Path.GetTempPath(), "bls-test-" + Guid.NewGuid().ToString("N") + ".log");
+        using (var provider = new FileLoggerProvider(Options(logFile), (_, level) => level >= LogLevel.Warning))
+        {
+            var logger = provider.CreateLogger("Test");
+
+            Assert.True(logger.IsEnabled(LogLevel.Error));
+            Assert.False(logger.IsEnabled(LogLevel.Information));
+            Assert.False(logger.IsEnabled(LogLevel.None));
+            Assert.False(logger.IsEnabled(LogLevel.Trace)); // below Warning
+        }
+    }
+
+    [Fact]
+    public void FileLogger_BeginScope_ReturnsNullScope()
+    {
+        string logFile = Path.Combine(Path.GetTempPath(), "bls-test-" + Guid.NewGuid().ToString("N") + ".log");
+        using (var provider = new FileLoggerProvider(Options(logFile), AcceptAll))
+        {
+            var logger = provider.CreateLogger("Test");
+            Assert.Null(logger.BeginScope("scope"));
+        }
+    }
+
+    [Fact]
+    public void FileLogger_CriticalLevel_WritesCritCode()
+    {
+        string logFile = Path.Combine(Path.GetTempPath(), "bls-test-" + Guid.NewGuid().ToString("N") + ".log");
+        using (var provider = new FileLoggerProvider(Options(logFile), AcceptAll))
+        {
+            provider.CreateLogger("Test").LogCritical("critical!");
+        }
+        string line = File.ReadAllLines(logFile).Single();
+        Assert.Contains("[CRT]", line);
+    }
+
+    [Fact]
+    public void Provider_Dispose_Twice_DoesNotThrow()
+    {
+        string logFile = Path.Combine(Path.GetTempPath(), "bls-test-" + Guid.NewGuid().ToString("N") + ".log");
+        var provider = new FileLoggerProvider(Options(logFile), AcceptAll);
+        provider.Dispose();
+        provider.Dispose(); // second dispose must be a no-op
+    }
+
+    [Fact]
+    public void Write_AfterDispose_DoesNotThrow()
+    {
+        string logFile = Path.Combine(Path.GetTempPath(), "bls-test-" + Guid.NewGuid().ToString("N") + ".log");
+        var provider = new FileLoggerProvider(Options(logFile), AcceptAll);
+        var logger = provider.CreateLogger("Test");
+        provider.Dispose();
+
+        logger.LogInformation("after dispose"); // must not throw
+        Assert.True(true);
+    }
 }
