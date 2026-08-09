@@ -17,16 +17,33 @@ public sealed class PowerEventMonitor : IDisposable
 
     private readonly ILogger<PowerEventMonitor> _logger;
     private readonly WndProcDelegate _wndProc; // kept alive for the native window procedure
+    private readonly string _className;        // unique per instance (see ctor)
+    private readonly object _hwndGate = new();
     private Thread? _thread;
     private IntPtr _hwnd;
+    private bool _classRegistered;
     private volatile bool _running;
     private long _lastResumeTick;
 
     /// <summary>True while the message-loop thread is intended to run (internal for tests).</summary>
     internal bool IsRunning => _running;
 
+    /// <summary>Set once the hidden window exists and the message loop is about to pump (internal for tests).</summary>
+    internal ManualResetEventSlim MessageLoopReady { get; } = new();
+
     /// <summary>Handle of the hidden message window (internal for tests to send messages).</summary>
-    internal IntPtr WindowHandle => _hwnd;
+    internal IntPtr WindowHandle
+    {
+        get
+        {
+            // _hwnd is written by the message-loop thread; a plain read could see a stale
+            // value (non-volatile) — read it under the same lock the loop uses on write.
+            lock (_hwndGate)
+            {
+                return _hwnd;
+            }
+        }
+    }
 
     /// <summary>Raised when the system resumes from sleep/hibernate.</summary>
     public event Action? Resumed;
@@ -35,6 +52,11 @@ public sealed class PowerEventMonitor : IDisposable
     {
         _logger = logger;
         _wndProc = WndProc;
+        // A UNIQUE class name per instance: RegisterClass registers a class once per
+        // process, and every window created with that name dispatches through the FIRST
+        // registration's wndproc. Sharing a name across instances would route messages of
+        // later monitors to an earlier (possibly disposed) monitor — a real bug.
+        _className = "BacklightSyncPowerEventWindow_" + Guid.NewGuid().ToString("N");
     }
 
     public void Start()
@@ -42,19 +64,19 @@ public sealed class PowerEventMonitor : IDisposable
         if (_running)
             return;
         _running = true;
+        MessageLoopReady.Reset();
         _thread = new Thread(MessageLoop) { IsBackground = true, Name = "PowerEventMonitor" };
         _thread.Start();
     }
 
     private void MessageLoop()
     {
-        const string className = "BacklightSyncPowerEventWindow";
         try
         {
             var wndClass = new WndClass
             {
                 lpfnWndProc = Marshal.GetFunctionPointerForDelegate(_wndProc),
-                lpszClassName = className,
+                lpszClassName = _className,
                 hInstance = Native.GetModuleHandle(null),
             };
 
@@ -64,17 +86,26 @@ public sealed class PowerEventMonitor : IDisposable
                 _logger.LogWarning("RegisterClass failed ({Error}) — power event monitoring unavailable.", Marshal.GetLastWin32Error());
                 return;
             }
+            _classRegistered = true;
 
-            _hwnd = Native.CreateWindowEx(
-                0, className, "BacklightSyncPowerEventWindow",
+            IntPtr hwnd = Native.CreateWindowEx(
+                0, _className, _className,
                 0, 0, 0, 0, 0, IntPtr.Zero, IntPtr.Zero, wndClass.hInstance, IntPtr.Zero);
-            if (_hwnd == IntPtr.Zero)
+            if (hwnd == IntPtr.Zero)
             {
                 _logger.LogWarning("CreateWindowEx failed ({Error}) — power event monitoring unavailable.", Marshal.GetLastWin32Error());
                 return;
             }
+            lock (_hwndGate)
+            {
+                _hwnd = hwnd; // publish under the gate so WindowHandle readers see it
+            }
 
-            _logger.LogDebug("Power event window created (hwnd 0x{Handle:X}).", _hwnd.ToInt64());
+            _logger.LogDebug("Power event window created (hwnd 0x{Handle:X}).", hwnd.ToInt64());
+
+            // Signal readiness AFTER the window exists and right before pumping, so tests
+            // (and any other caller) can post messages without racing the message loop.
+            MessageLoopReady.Set();
 
             while (_running && Native.GetMessage(out Msg msg, IntPtr.Zero, 0, 0) > 0)
             {
@@ -82,8 +113,11 @@ public sealed class PowerEventMonitor : IDisposable
                 Native.DispatchMessage(ref msg);
             }
 
-            Native.DestroyWindow(_hwnd);
-            _hwnd = IntPtr.Zero;
+            Native.DestroyWindow(hwnd);
+            lock (_hwndGate)
+            {
+                _hwnd = IntPtr.Zero;
+            }
         }
         catch (Exception ex)
         {
@@ -144,10 +178,29 @@ public sealed class PowerEventMonitor : IDisposable
     public void Dispose()
     {
         _running = false;
-        if (_hwnd != IntPtr.Zero)
-            Native.PostMessage(_hwnd, 0x0012 /* WM_QUIT */, IntPtr.Zero, IntPtr.Zero); // unblock GetMessage
+        IntPtr hwnd;
+        lock (_hwndGate)
+        {
+            hwnd = _hwnd;
+        }
+        if (hwnd != IntPtr.Zero)
+            Native.PostMessage(hwnd, 0x0012 /* WM_QUIT */, IntPtr.Zero, IntPtr.Zero); // unblock GetMessage
         _thread?.Join(TimeSpan.FromSeconds(3));
         _thread = null;
+
+        // Unregister our unique class so no stale wndproc survives (hygiene + test isolation).
+        if (_classRegistered)
+        {
+            try
+            {
+                Native.UnregisterClass(_className, Native.GetModuleHandle(null));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "UnregisterClass failed.");
+            }
+            _classRegistered = false;
+        }
     }
 
     private delegate IntPtr WndProcDelegate(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
@@ -207,6 +260,9 @@ public sealed class PowerEventMonitor : IDisposable
 
         [DllImport("user32.dll")]
         internal static extern bool PostMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+
+        [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        internal static extern bool UnregisterClass(string lpClassName, IntPtr hInstance);
 
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
         internal static extern IntPtr GetModuleHandle(string? lpModuleName);

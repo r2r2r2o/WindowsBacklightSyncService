@@ -26,10 +26,8 @@ public class PowerEventMonitorWindowsTests
     {
         var monitor = new PowerEventMonitor(NullLogger<PowerEventMonitor>.Instance);
         monitor.Start();
-        // Wait for the message-loop thread to create the hidden window.
-        var deadline = DateTime.UtcNow.AddSeconds(5);
-        while (monitor.WindowHandle == IntPtr.Zero && DateTime.UtcNow < deadline)
-            Thread.Sleep(25);
+        // Wait for the message-loop thread to create the hidden window and enter the pump.
+        Assert.True(monitor.MessageLoopReady.Wait(TimeSpan.FromSeconds(5)), "message loop did not become ready");
         Assert.NotEqual(IntPtr.Zero, monitor.WindowHandle);
         return monitor;
     }
